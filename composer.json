@@ -1,0 +1,33 @@
+{
+    "name": "corbin-auriti/calplan",
+    "description": "Automatically place flagged tasks into free calendar slots",
+    "type": "project",
+    "license": "AGPL-3.0-or-later",
+    "authors": [
+        {
+            "name": "Corbin Auriti"
+        }
+    ],
+    "require": {
+        "php": ">=8.2"
+    },
+    "require-dev": {
+        "nextcloud/coding-standard": "^1.1",
+        "phpunit/phpunit": "^9.6",
+        "friendsofphp/php-cs-fixer": "^3.42"
+    },
+    "config": {
+        "platform": {
+            "php": "8.2"
+        },
+        "optimize-autoloader": true,
+        "classmap-authoritative": true
+    },
+    "scripts": {
+        "cs:check": "php-cs-fixer fix --dry-run --verbose",
+        "cs:fix": "php-cs-fixer fix",
+        "lint": "find . -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n1 php -l",
+        "test:unit": "phpunit --configuration phpunit.xml --fail-on-warning",
+        "benchmark:scheduler": "php tests/Performance/benchmark-scheduler.php"
+    }
+}

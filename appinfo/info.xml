@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+    <id>calplan</id>
+    <name>CalPlan</name>
+    <summary>Your calendar, sorted — automatically place flagged tasks into free slots</summary>
+    <description><![CDATA[CalPlan finds time for your Nextcloud tasks. Turn on **Auto-schedule** for a task and CalPlan adds a `🔒 Task title` time block to the first free place in your working hours. When you edit or finish the task, CalPlan updates or removes the block.
+
+**Important setup:** put scheduled tasks in a calendar/list that supports **both tasks and events** (`VTODO` + `VEVENT`). A Tasks-only list cannot store CalPlan's event block, and Tasks-only calendars may not appear in third-party calendar apps. In Nextcloud Tasks, choose a normal calendar that supports tasks—not a Tasks-only list.
+
+**How it works**
+1. Open a task in Nextcloud Tasks and turn on **Auto-schedule** (or add the standard `calplan` tag from another CalDAV client).
+2. CalPlan checks your calendars for busy time and finds a free block. Personal exclusions can completely remove selected calendars from CalPlan or make ordinary events with selected titles stop counting as busy.
+3. It writes one derived event for that task. The task remains the source of truth: edit the task, not the calendar block.
+4. Completing, cancelling, or untagging the task removes its block on the next reconcile.
+
+Task start and due dates are respected. The default block is 30 minutes; set a standard iCalendar `DURATION`, or add a notes line such as `Duration: 15min` or `Duration: 1hr`. A `First step:` notes line is shown as `👣 First step:` in the slot; legacy `Next:` lines remain supported. Help buttons beside Reconcile and Auto-schedule explain these helpers.
+
+After a task block ends, CalPlan can add a filterable `calplan-review` (“Is complete?”) task tag and either try another time or pause Auto-schedule, according to your personal setting. Personal limits can cap both task minutes and task-block count per day. Ignored calendars are completely outside CalPlan: their tasks, events, tags, and existing blocks are not read or changed. Ignored event-title rules are case-insensitive and can use exact or contains matching; they affect ordinary busy events only, never tasks or CalPlan blocks. The Reconcile help shows the latest run, while Personal settings keeps privacy-safe diagnostics for the latest ten runs. CalPlan is self-contained, uses standard iCalendar properties, and does not patch the Tasks or Calendar apps. Calendar changes are picked up by the background/on-demand reconcile; task edits reconcile immediately. Calendar clients refresh on their own sync interval, so you may need to press refresh to see a new or removed block right away.]]></description>
+    <version>0.9.11</version>
+    <licence>AGPL-3.0-or-later</licence>
+    <author>Corbin Auriti</author>
+    <namespace>AutoSchedule</namespace>
+    <documentation>
+        <admin>https://github.com/corbin-auriti/calplan#readme</admin>
+    </documentation>
+    <category>organization</category>
+    <category>office</category>
+    <bugs>https://github.com/corbin-auriti/calplan/issues</bugs>
+    <repository type="git">https://github.com/corbin-auriti/calplan.git</repository>
+    <screenshot>https://raw.githubusercontent.com/corbin-auriti/calplan/v0.9.11/img/screenshots/calplan-screenshot-01.png</screenshot>
+    <screenshot>https://raw.githubusercontent.com/corbin-auriti/calplan/v0.9.11/img/screenshots/calplan-screenshot-02.png</screenshot>
+    <screenshot>https://raw.githubusercontent.com/corbin-auriti/calplan/v0.9.11/img/screenshots/calplan-screenshot-03.png</screenshot>
+    <dependencies>
+        <php min-version="8.2" />
+        <nextcloud min-version="32" max-version="34" />
+    </dependencies>
+    <background-jobs>
+        <job>OCA\AutoSchedule\BackgroundJob\ReconcileJob</job>
+    </background-jobs>
+    <settings>
+        <personal>OCA\AutoSchedule\Settings\Personal</personal>
+        <personal-section>OCA\AutoSchedule\Settings\PersonalSection</personal-section>
+    </settings>
+</info>

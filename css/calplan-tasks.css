@@ -1,0 +1,289 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Nextcloud contributors
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * CalPlan Tasks-frontend injection styles.
+ */
+
+/* 1. Task list item badge/icon */
+.calplan-task-icon {
+	display: inline-flex;
+	align-items: center;
+	margin-inline: 4px;
+	color: var(--color-primary-element, #0082c9);
+	opacity: 0.9;
+	vertical-align: middle;
+}
+
+.calplan-task-icon .calplan-icon {
+	display: block;
+}
+
+/* 2. Sidebar Auto-schedule row — mirrors the Tasks app's native
+ *    DateTimePickerItem / CheckboxItem `.property__item` geometry so the
+ *    icon column and text baseline line up with the Start/Due rows above. */
+.property__item.calplan-toggle-row {
+	border-bottom: 1px solid var(--color-border);
+	padding: 0 6px;
+	position: relative;
+	width: 100%;
+	color: var(--color-text-lighter);
+	display: flex;
+	cursor: pointer;
+	transition: background-color 0.15s ease;
+}
+
+.property__item.calplan-toggle-row:hover {
+	background-color: var(--color-background-hover);
+}
+
+.property__item.calplan-toggle-row .item__content {
+	display: flex;
+	align-items: center;
+	line-height: var(--default-clickable-area);
+	min-width: 0;
+	flex-grow: 1;
+	gap: 0 4px;
+}
+
+.property__item.calplan-toggle-row .content__icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: var(--default-clickable-area);
+	width: var(--default-clickable-area);
+	min-width: var(--default-clickable-area);
+	flex-shrink: 0;
+	color: var(--color-text-lighter, #777);
+	transition: color 0.2s ease;
+}
+
+.property__item.calplan-toggle-row.is-active .content__icon {
+	color: var(--color-primary-element, #0082c9);
+}
+
+.property__item.calplan-toggle-row .content__name {
+	flex-grow: 1;
+	padding-right: 14px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.property__item.calplan-toggle-row .item__actions {
+	display: flex;
+	flex-wrap: nowrap;
+	align-items: center;
+}
+
+.calplan-help-button,
+.calplan-help-close {
+	border: 0;
+	background: transparent;
+	color: var(--color-text-lighter);
+	cursor: pointer;
+}
+
+.calplan-help-button {
+	width: 30px;
+	height: 30px;
+	margin-inline-end: 8px;
+	border-radius: 50%;
+	font-weight: 700;
+}
+
+.calplan-help-button:hover,
+.calplan-help-button:focus-visible {
+	background: var(--color-background-hover);
+	color: var(--color-main-text);
+}
+
+.calplan-help-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 10000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 20px;
+	background: rgba(0, 0, 0, 0.45);
+}
+
+.calplan-help-dialog {
+	width: min(560px, 100%);
+	max-height: 85vh;
+	overflow: auto;
+	padding: 20px 24px;
+	border-radius: var(--border-radius-large, 12px);
+	background: var(--color-main-background);
+	color: var(--color-main-text);
+	box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+}
+
+.calplan-help-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.calplan-help-header h2,
+.calplan-help-dialog h3 {
+	margin-top: 0;
+}
+
+.calplan-help-close {
+	font-size: 28px;
+	line-height: 1;
+}
+
+.calplan-help-dialog code {
+	padding: 2px 5px;
+	border-radius: 4px;
+	background: var(--color-background-dark);
+}
+
+.calplan-last-run {
+	padding: 10px 12px;
+	border-radius: var(--border-radius-element, 6px);
+	background: var(--color-background-dark);
+}
+
+.calplan-last-run p { margin: 4px 0; }
+.calplan-help-warning { color: var(--color-error-text, #c00); font-weight: 600; }
+
+/* 3. Sleek toggle switch */
+.calplan-switch-wrapper {
+	position: relative;
+	display: inline-block;
+	width: 36px;
+	height: 20px;
+	flex-shrink: 0;
+}
+
+.calplan-switch-input {
+	opacity: 0;
+	width: 0;
+	height: 0;
+	position: absolute;
+	margin: 0;
+	pointer-events: none;
+}
+
+.calplan-switch-slider {
+	position: absolute;
+	cursor: pointer;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	background-color: var(--color-border, #ccc);
+	transition: background-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+	border-radius: 20px;
+}
+
+.calplan-switch-slider::before {
+	position: absolute;
+	content: "";
+	height: 16px;
+	width: 16px;
+	left: 2px;
+	bottom: 2px;
+	background-color: var(--color-main-background, #ffffff);
+	transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+	border-radius: 50%;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.calplan-switch-input:checked + .calplan-switch-slider {
+	background-color: var(--color-primary-element, #0082c9);
+}
+
+.calplan-switch-input:focus-visible + .calplan-switch-slider {
+	box-shadow: 0 0 0 2px var(--color-primary-element-light, rgba(0, 130, 201, 0.4));
+}
+
+.calplan-switch-input:checked + .calplan-switch-slider::before {
+	transform: translateX(16px);
+}
+
+.property__item.calplan-toggle-row:focus-visible {
+	box-shadow: inset 0 0 0 2px var(--color-primary-element-light, rgba(0, 130, 201, 0.4));
+	outline: none;
+	border-radius: 2px;
+}
+
+
+/* 4. First action in the Tasks left navigation, above smart collections. */
+.calplan-reconcile-item {
+	list-style: none;
+	width: 100%;
+	display: flex;
+	align-items: center;
+}
+
+.calplan-reconcile-now {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: calc(100% - 46px);
+	min-height: var(--default-clickable-area, 44px);
+	margin: 4px;
+	padding: 0 12px;
+	border: 0;
+	border-radius: var(--border-radius-element, 6px);
+	background: transparent;
+	color: var(--color-main-text);
+	text-align: left;
+	cursor: pointer;
+}
+
+.calplan-navigation-help {
+	width: 34px;
+	height: 34px;
+	margin-inline-end: 4px;
+	border: 0;
+	border-radius: 50%;
+	background: transparent;
+	color: var(--color-text-lighter);
+	font-weight: 700;
+	cursor: pointer;
+}
+
+.calplan-navigation-help:hover,
+.calplan-navigation-help:focus-visible {
+	background: var(--color-background-hover);
+	color: var(--color-main-text);
+}
+
+.calplan-reconcile-now:hover,
+.calplan-reconcile-now:focus-visible {
+	background: var(--color-background-hover);
+}
+
+.calplan-reconcile-now:focus-visible {
+	outline: 2px solid var(--color-primary-element);
+	outline-offset: -2px;
+}
+
+.calplan-reconcile-now:disabled {
+	cursor: wait;
+	opacity: 0.7;
+}
+
+.calplan-reconcile-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 20px;
+	height: 20px;
+	font-size: 22px;
+	color: var(--color-primary-element);
+}
+
+.calplan-reconcile-now.is-running .calplan-reconcile-icon {
+	animation: calplan-reconcile-spin 0.9s linear infinite;
+}
+
+@keyframes calplan-reconcile-spin {
+	to { transform: rotate(360deg); }
+}

@@ -1,0 +1,30 @@
+/* SPDX-FileCopyrightText: 2026 Nextcloud contributors
+ * SPDX-License-Identifier: AGPL-3.0-or-later */
+#calplan-personal-settings { max-width: 720px; }
+.calplan-settings-group { margin: 14px 0; border: 1px solid var(--color-border); border-radius: var(--border-radius-large, 10px); background: var(--color-main-background); }
+.calplan-settings-group > summary { padding: 14px 16px; font-size: 1.1rem; font-weight: 600; cursor: pointer; border-radius: inherit; }
+.calplan-settings-group > summary:hover, .calplan-settings-group > summary:focus-visible { background: var(--color-background-hover); }
+.calplan-settings-group[open] > summary { border-bottom: 1px solid var(--color-border); border-end-start-radius: 0; border-end-end-radius: 0; }
+.calplan-settings-group__content { padding: 4px 18px 18px; }
+.calplan-setting-row { margin: 20px 0; }
+.calplan-setting-row > label { display: block; font-weight: 600; margin-bottom: 6px; }
+.calplan-setting-row input[type="number"], .calplan-setting-row select, .calplan-setting-row textarea { min-width: 260px; }
+.calplan-setting-row textarea { width: min(520px, 100%); resize: vertical; }
+#calplan-settings-status { margin-inline-start: 12px; }
+.calplan-checkbox-row { display: flex; align-items: center; gap: 8px; }
+#calplan-personal-settings h3 { margin-top: 36px; }
+#calplan-history-status { display: inline-block; margin-inline-start: 12px; }
+#calplan-exclusions-status { display: inline-block; margin-inline-start: 12px; }
+.calplan-warning { margin: 12px 0 20px; padding: 12px 14px; border-inline-start: 4px solid var(--color-warning, #eca700); border-radius: var(--border-radius-element, 6px); background: var(--color-background-dark); }
+.calplan-calendar-exclusions { max-width: 520px; margin: 20px 0; padding: 0; border: 0; }
+.calplan-calendar-exclusions legend { margin-bottom: 8px; font-weight: 600; }
+.calplan-calendar-option { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; align-items: center; min-height: 40px; padding: 4px 8px; border-radius: var(--border-radius-element, 6px); }
+.calplan-calendar-option:hover { background: var(--color-background-hover); }
+.calplan-calendar-option input { grid-row: 1 / 3; }
+.calplan-calendar-option small { color: var(--color-text-maxcontrast); }
+.calplan-diagnostic-run { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--border-radius-element, 6px); }
+.calplan-diagnostic-run > summary, .calplan-diagnostic-calendars > summary { cursor: pointer; }
+.calplan-diagnostic-grid { display: grid; grid-template-columns: minmax(120px, auto) 1fr; gap: 4px 14px; margin: 12px 0; }
+.calplan-diagnostic-grid dt { font-weight: 600; }
+.calplan-diagnostic-grid dd { margin: 0; }
+.calplan-diagnostic-calendars ul { margin: 8px 0 0 20px; }
