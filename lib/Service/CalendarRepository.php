@@ -187,11 +187,12 @@ class CalendarRepository {
 	/** Remove the working-slot VEVENT for *taskUid*, tolerating "already gone". */
 	public function deleteSlot(string $calendarId, string $taskUid): void {
 		$objectUri = $this->slotObjectUri($taskUid);
-		try {
-			$this->backend->deleteCalendarObject($calendarId, $objectUri);
-		} catch (\Throwable $_) {
-			// already gone is fine
-		}
+		// CalDavBackend::deleteCalendarObject() already treats an absent object as
+		// a successful no-op. Do not swallow real backend, permission, transaction,
+		// or trash-name-conflict failures here: ReconcileService isolates the failed
+		// write and reports it in diagnostics so a stale slot is never claimed as
+		// successfully removed.
+		$this->backend->deleteCalendarObject($calendarId, $objectUri);
 	}
 
 	private function slotObjectUri(string $taskUid): string {

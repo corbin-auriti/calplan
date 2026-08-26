@@ -5,9 +5,29 @@ All notable changes to CalPlan are documented here. The format is based on
 [Semantic Versioning](https://semver.org/).
 
 **Release status:** 0.9.11 is the first version published as a standalone source
-repository and Git tag. The Nextcloud App Store release is still pending signing
-certificate approval. Versions 0.1.0 through 0.9.10 were internal development
-milestones and were not public App Store releases.
+repository and Git tag. Version 0.9.12 is the `v0.9.11_1` correctness hotfix.
+The Nextcloud App Store release is still pending signing certificate approval.
+Versions 0.1.0 through 0.9.10 were internal development milestones and were not
+public App Store releases.
+
+## 0.9.12 — 2026-08-26
+
+Published under the requested Git tag `v0.9.11_1`. Nextcloud app metadata uses
+0.9.12 because the App Store schema requires a three-part semantic version and an
+upgrade must sort after 0.9.11.
+
+### Fixed
+- Fixed Nextcloud 34 background cron startup by injecting the public
+  `OCP\App\IAppManager` interface instead of the nonexistent
+  `OCP\IAppManager`. The invalid dependency previously aborted the entire cron
+  tick before CalPlan's job could run and prevented `core:lastcron` from advancing.
+- Slot deletion no longer swallows every backend exception. Missing slots remain
+  harmless no-ops in Nextcloud's CalDAV backend, while real permission, database,
+  transaction, or trash-conflict failures now reach CalPlan's per-object failure
+  isolation and diagnostics instead of being falsely reported as removed.
+- Added live CalDAV regression coverage proving that completing a flagged task
+  removes its generated event from the server. An already-open Calendar page may
+  still need its normal refresh/sync before the removed block disappears visually.
 
 ## 0.9.11 — 2026-08-24
 

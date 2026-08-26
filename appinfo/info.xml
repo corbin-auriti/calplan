@@ -17,7 +17,7 @@
 Task start and due dates are respected. The default block is 30 minutes; set a standard iCalendar `DURATION`, or add a notes line such as `Duration: 15min` or `Duration: 1hr`. A `First step:` notes line is shown as `👣 First step:` in the slot; legacy `Next:` lines remain supported. Help buttons beside Reconcile and Auto-schedule explain these helpers.
 
 After a task block ends, CalPlan can add a filterable `calplan-review` (“Is complete?”) task tag and either try another time or pause Auto-schedule, according to your personal setting. Personal limits can cap both task minutes and task-block count per day. Ignored calendars are completely outside CalPlan: their tasks, events, tags, and existing blocks are not read or changed. Ignored event-title rules are case-insensitive and can use exact or contains matching; they affect ordinary busy events only, never tasks or CalPlan blocks. The Reconcile help shows the latest run, while Personal settings keeps privacy-safe diagnostics for the latest ten runs. CalPlan is self-contained, uses standard iCalendar properties, and does not patch the Tasks or Calendar apps. Calendar changes are picked up by the background/on-demand reconcile; task edits reconcile immediately. Calendar clients refresh on their own sync interval, so you may need to press refresh to see a new or removed block right away.]]></description>
-    <version>0.9.11</version>
+    <version>0.9.12</version>
     <licence>AGPL-3.0-or-later</licence>
     <author>Corbin Auriti</author>
     <namespace>AutoSchedule</namespace>
