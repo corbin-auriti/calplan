@@ -33,11 +33,15 @@ CalPlan works with Nextcloud calendars that contain both:
 - `VTODO` objects for tasks; and
 - `VEVENT` objects for calendar blocks.
 
-A task/event calendar is the safest choice. Nextcloud itself can store the
-generated event in a calendar that Tasks presents as task-focused, but some
-third-party clients do not display mixed task/event calendars reliably. If a
-client does not show the generated blocks, try the same calendar in Nextcloud
-Calendar or use a normal calendar with task support.
+A task/event calendar is the safest choice. A Tasks-only list (what the Tasks
+app creates) cannot show an event in any calendar, so CalPlan gives its tasks
+no block (Reconcile diagnostics count them as not scheduled). Some third-party
+clients do not display mixed task/event calendars reliably; if a client does
+not show the generated blocks, try the same calendar in Nextcloud Calendar.
+
+CalPlan plans and writes only in your own calendars. Tasks in a calendar someone
+shared with you are planned by its owner's CalPlan; its events, like those of
+subscriptions and federated calendars, count as your busy time.
 
 Nextcloud background jobs should also be configured. Task edits are handled
 immediately, but calendar-event changes and timed review checks depend on the
@@ -89,7 +93,8 @@ still accepted.
 
 CalPlan plans up to 14 days ahead on a 15-minute grid.
 
-- Busy time comes from all of your active calendars.
+- Busy time comes from all of your active calendars, including calendars
+  shared with you, subscriptions and federated calendars.
 - `TRANSPARENT` events do not block time.
 - Ignored calendars are not read or changed at all.
 - Selected ordinary event titles can be ignored as busy time.
@@ -98,14 +103,20 @@ CalPlan plans up to 14 days ahead on a 15-minute grid.
   the task is left unscheduled.
 - An overdue task, or a task without a due date, may roll forward and is tried in
   the earliest available slot.
-- A future start time outside normal working hours may open time for that task
-  from its start time through the end of that day.
-- Daily task minutes and daily block count are both enforced.
+- A start time outside working hours, on a working day, may open time for that
+  task from its start time through the end of that day; so does a start time
+  too close to the end of the working hours for the task.
+- A block that has started stays where it is until the expired-block review
+  has looked at it, unless an event now overlaps it: then it did not happen,
+  and its task is planned again from now.
+- Daily task minutes and daily block count are both enforced, counting the
+  day's blocks that have already started or ended.
 - Task gaps and buffers around ordinary events are applied before placement.
 
 Tasks with a missed due date are considered first, followed by tasks with a
 missed start date, then other tasks. Within those groups, due date and priority
-affect order, with shorter tasks used as a tiebreaker.
+(high 1 … low 9; none counts as medium) affect order, with shorter tasks used as
+a tiebreaker. Tasks without a due date come after dated ones.
 
 The scheduler is informed by established scheduling rules: earliest-deadline-
 first, shortest-processing-time, and Moore–Hodgson late-job scheduling. CalPlan
@@ -131,7 +142,7 @@ constraints. This is a future direction, not behavior implemented in 0.9.11.
 ## When CalPlan updates
 
 - **Task changes:** task create, edit, completion, deletion, or trash triggers an
-  immediate reconcile.
+  immediate reconcile, once per save request, before the request returns.
 - **Calendar-event changes:** picked up by the background job or manual
   Reconcile. Saving an ordinary meeting does not run a full schedule inside the
   save request.
@@ -158,9 +169,10 @@ Open **Personal settings → CalPlan** to configure:
 - optional scheduling-history collection; and
 - recent privacy-safe Reconcile diagnostics.
 
-Working hours come from CalPlan's saved working-hours configuration, then
-Nextcloud availability when present. Otherwise CalPlan defaults to 09:00–17:00
-on every day of the week.
+Working hours come from CalPlan's saved working-hours configuration (set through
+its API), then your Nextcloud availability (**Personal settings → Availability**,
+one window per day from its first to its last slot) when present. Otherwise
+CalPlan defaults to 09:00–17:00 on every day of the week.
 
 ## Expired blocks
 
@@ -170,7 +182,8 @@ standard `calplan-review` category.
 - With automatic rescheduling enabled, CalPlan keeps the task scheduled and
   tries another time.
 - With automatic rescheduling off, CalPlan removes `calplan`, deletes the block,
-  and pauses the task. Turn **Auto-schedule** on again to restart it.
+  and pauses the task. Turn **Auto-schedule** on again (or add `calplan` again
+  from any client) to restart it.
 
 ## Privacy
 
@@ -190,9 +203,8 @@ Files or deleted from Personal settings.
 - Cancelled meetings and invitations you declined can still count as busy unless
   they are transparent or excluded by title.
 - Moving a generated block does not pin it.
-- Calendar-event changes are not reconciled immediately without a working
-  background-job runner or a manual Reconcile.
-- A Tasks-only calendar cannot hold generated blocks.
+- A Tasks-only list cannot show generated blocks, so its tasks are not
+  scheduled.
 
 ## Install from source
 

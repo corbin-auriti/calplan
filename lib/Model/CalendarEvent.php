@@ -29,6 +29,10 @@ class CalendarEvent {
 		public readonly ?int $priority = null,
 		public readonly ?int $percentComplete = null,
 		public readonly ?string $transp = null,
+		/** The calendar object (.ics) holding the event; an owned block is updated and deleted there. */
+		public readonly ?string $objectUri = null,
+		/** CLASS of an owned block, compared with the task's. */
+		public readonly ?string $classification = null,
 	) {
 	}
 

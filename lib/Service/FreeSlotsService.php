@@ -63,19 +63,25 @@ class FreeSlotsService {
 		return new Slot($start, $end);
 	}
 
-	/** Subtract busy blocks from *window*, returning the remaining free slots. */
+	/**
+	 * Subtract busy blocks from *window*, returning the remaining free slots.
+	 * They stay in the window's (the user's) timezone even where a busy block's
+	 * edge (often UTC, e.g. an expanded recurring event) cuts them, so a slot's
+	 * calendar day is the user's day.
+	 */
 	public static function subtractBusy(Slot $window, array $busy): array {
+		$tz = $window->start->getTimezone();
 		$clips = [];
 		foreach ($busy as $b) {
-			if (!($b instanceof BusyBlock)) {
-				continue;
+			if (!($b instanceof BusyBlock) || $b->end <= $b->start) {
+				continue; // a reversed or empty block holds no time
 			}
 			if ($b->end <= $window->start || $b->start >= $window->end) {
 				continue;
 			}
 			$clips[] = new Slot(
-				$b->start > $window->start ? $b->start : $window->start,
-				$b->end < $window->end ? $b->end : $window->end,
+				$b->start > $window->start ? $b->start->setTimezone($tz) : $window->start,
+				$b->end < $window->end ? $b->end->setTimezone($tz) : $window->end,
 			);
 		}
 		if ($clips === []) {

@@ -24,14 +24,17 @@ use OCA\AutoSchedule\Model\Task;
 use OCA\AutoSchedule\Model\WorkingHours;
 
 class SchedulerService {
-	/** Whole days from *now* to the task's due date; far-future if none. */
+	/** Whole calendar days, in the user's timezone (*now*'s), from today to the task's due day; far-future if none. */
 	public function daysUntilDue(Task $task, \DateTimeImmutable $now): float {
-		if ($task->due === null) {
+		$due = $task->due;
+		if ($due === null) {
 			return (float)Defaults::NO_DUE_HORIZON_DAYS;
 		}
-		$dueDay = $task->due->setTime(0, 0, 0);
+		$dueDay = $due->setTimezone($now->getTimezone())->setTime(0, 0, 0);
 		$nowDay = $now->setTime(0, 0, 0);
-		$days = (int)floor(($dueDay->getTimestamp() - $nowDay->getTimestamp()) / 86400);
+		// diff() counts wall-clock days between two midnights of one timezone,
+		// so a DST change in between does not lose or add a day.
+		$days = (int)$nowDay->diff($dueDay)->format('%r%a');
 		return max(0.0, (float)$days);
 	}
 
@@ -61,122 +64,114 @@ class SchedulerService {
 		return array_values(array_filter($tasks, fn (Task $t) => $t->autoSchedule && !$t->isDone()));
 	}
 
-	/** Insert *slot* keeping the list ordered by start time. */
-	private function insertSorted(array &$slots, Slot $slot): void {
-		$lo = 0;
-		$hi = count($slots);
-		while ($lo < $hi) {
-			$mid = (int)floor(($lo + $hi) / 2);
-			if ($slots[$mid]->start < $slot->start) {
-				$lo = $mid + 1;
-			} else {
-				$hi = $mid;
-			}
+	/**
+	 * Where *task* can go in *slot*: a block of *minutes* starting at the
+	 * slot's start or later - never before the task's DTSTART (rounded up to
+	 * the 15-minute grid) - that fits in the slot, ends by the DUE when
+	 * *respectDue*, and stays within the day's cap and the blocks-per-day
+	 * limit. Null otherwise; a block-count rejection is noted in *why*.
+	 *
+	 * @param array{count: bool} $why
+	 */
+	private function tryFit(PlanState $st, Slot $slot, Task $task, int $minutes, bool $respectDue, array &$why): ?Slot {
+		$start = $this->earliestStart($st, $slot, $task);
+		if ($start >= $slot->end) {
+			return null;
 		}
-		array_splice($slots, $lo, 0, [$slot]);
+		$end = PlanState::plusMinutes($start, $minutes);
+		if ($end > $slot->end) {
+			return null;
+		}
+		if ($respectDue && $task->due !== null && $end > $task->due) {
+			return null;
+		}
+		$day = $st->day($start);
+		if (($st->dailyMinutes[$day] ?? 0) + $minutes > $st->dailyCap) {
+			return null;
+		}
+		if ($st->dailyTaskCount > 0 && ($st->dailyBlocks[$day] ?? 0) >= $st->dailyTaskCount) {
+			$why['count'] = true;
+			return null;
+		}
+		return new Slot($start, $end);
 	}
 
 	/**
-	 * Does *task* fit in *slot*? Returns the would-be [start,end] placement, or null.
-	 * The usable start is clamped to the task's DTSTART (never placed before it);
-	 * the placement must fit within the slot, end <= DUE when $respectDue, and not
-	 * exceed the per-day cap.
-	 *
-	 * @param array<string,int> $dailyUsed
-	 * @return array{start:\DateTimeImmutable,end:\DateTimeImmutable}|null
+	 * The first moment in *slot* at which *task* may start. Free slots start on
+	 * the 15-minute grid or right after a placed block, so blocks follow each
+	 * other without gaps; a DTSTART off the grid (10:07) is rounded up to it.
 	 */
-	private function tryFit(Slot $s, Task $task, array $dailyUsed, int $dailyCap, bool $respectDue, array $dailyCountUsed = [], int $dailyTaskCount = 0, ?bool &$countRejected = null): ?array {
-		$usableStart = $s->start;
-		if ($task->start !== null && $task->start > $usableStart) {
-			$usableStart = $task->start;
+	private function earliestStart(PlanState $st, Slot $slot, Task $task): \DateTimeImmutable {
+		$start = $slot->start;
+		if ($task->start !== null && $task->start > $start) {
+			$start = FreeSlotsService::snapUp($task->start->setTimezone($st->tz));
 		}
-		if ($usableStart >= $s->end) {
-			return null;
-		}
-		$usableEnd = $usableStart->modify('+' . $task->estimatedMinutes . ' minutes');
-		if ($usableEnd > $s->end) {
-			return null;
-		}
-		if ($respectDue && $task->due !== null && $usableEnd > $task->due) {
-			return null;
-		}
-		$dayKey = $usableStart->setTime(0, 0, 0)->format('Y-m-d');
-		if (($dailyUsed[$dayKey] ?? 0) + $task->estimatedMinutes > $dailyCap) {
-			return null;
-		}
-		if ($dailyTaskCount > 0 && ($dailyCountUsed[$dayKey] ?? 0) >= $dailyTaskCount) {
-			$countRejected = true;
-			return null;
-		}
-		return ['start' => $usableStart, 'end' => $usableEnd];
+		return $start->setTimezone($st->tz);
 	}
 
 	/**
-	 * Earliest placement across the shared working-hours slots plus per-task
-	 * DTSTART-derived slots (1.5.5). Returns the chosen source descriptor or null.
+	 * The earliest whole block for *task* across the shared working-hours pool
+	 * and the task's own DTSTART windows (1.5.5), or null.
 	 *
-	 * @param Slot[]            $slots   shared working-hours pool (consumed on use)
-	 * @param Slot[]            $extra   per-task DTSTART slots (throwaway)
-	 * @param array<string,int> $dailyUsed
-	 * @return array{start:\DateTimeImmutable,end:\DateTimeImmutable,shared:bool,i:?int}|null
+	 * @param Slot[] $extra per-task DTSTART windows
+	 * @param array{count: bool} $why
 	 */
-	private function earliestSource(array $slots, array $extra, Task $task, array $dailyUsed, int $dailyCap, bool $respectDue, array $dailyCountUsed = [], int $dailyTaskCount = 0, ?bool &$countRejected = null): ?array {
+	private function earliestFit(PlanState $st, array $extra, Task $task, bool $respectDue, array &$why): ?Slot {
 		$best = null;
-		foreach ($slots as $i => $s) {
-			$place = $this->tryFit($s, $task, $dailyUsed, $dailyCap, $respectDue, $dailyCountUsed, $dailyTaskCount, $countRejected);
-			if ($place !== null && ($best === null || $place['start'] < $best['start'])) {
-				$best = ['start' => $place['start'], 'end' => $place['end'], 'shared' => true, 'i' => $i];
+		// The pool is ordered by start, so its first fit is its earliest one.
+		foreach ($st->slots as $slot) {
+			$best = $this->tryFit($st, $slot, $task, $task->estimatedMinutes, $respectDue, $why);
+			if ($best !== null) {
+				break;
 			}
 		}
-		foreach ($extra as $s) {
-			$place = $this->tryFit($s, $task, $dailyUsed, $dailyCap, $respectDue, $dailyCountUsed, $dailyTaskCount, $countRejected);
-			if ($place !== null && ($best === null || $place['start'] < $best['start'])) {
-				$best = ['start' => $place['start'], 'end' => $place['end'], 'shared' => false, 'i' => null];
+		foreach ($extra as $slot) {
+			$fit = $this->tryFit($st, $slot, $task, $task->estimatedMinutes, $respectDue, $why);
+			if ($fit !== null && ($best === null || $fit->start < $best->start)) {
+				$best = $fit;
 			}
 		}
 		return $best;
 	}
 
 	/**
-	 * 1.5.5 — DTSTART overrides working hours. When a task has a DTSTART that
-	 * falls OUTSIDE its working-hours window (e.g. 18:00 with hours 09-17), the
-	 * slot is allowed to start there: synthesize a per-task window from DTSTART
-	 * to the end of DTSTART's day (busy subtracted) and let it compete with the
-	 * shared working-hours pool. A PAST DTSTART yields no extra window (the shared
-	 * pool already rolls it forward to the next working window, never into the
-	 * past); a DTSTART INSIDE working hours yields none either (the shared pool
-	 * already covers it, clamped to DTSTART). Never places before $now.
+	 * 1.5.5 — DTSTART overrides working hours. A task with a timed DTSTART on
+	 * a working day may also use the rest of that day from its start: a
+	 * DTSTART outside the day's working hours (e.g. 18:00 with hours 09-17)
+	 * opens a window from it to the end of the day (busy time and the blocks
+	 * placed so far subtracted); so does one inside them that leaves too little
+	 * working time for the task. Never before *now* (a DTSTART earlier today
+	 * opens the window from now), never on an unchecked day, past the planning
+	 * window, or on another day than the DTSTART's.
 	 *
-	 * @param BusyBlock[]    $busy
-	 * @return Slot[]
+	 * @return Slot[] windows at least as long as the task
 	 */
-	private function dtstartSlots(Task $task, \DateTimeImmutable $now, array $busy, WorkingHours $working): array {
-		if ($task->start === null) {
+	private function dtstartSlots(PlanState $st, Task $task): array {
+		// An all-day start only means "from that day": no window outside working hours.
+		if ($task->start === null || $task->startAllDay) {
 			return [];
 		}
-		// Compare in the user's TZ (the same TZ the shared working-hours pool is
-		// computed in) so a UTC/floating DTSTART is judged against the user's local
-		// working window, not its own TZ (plan 1.5.5).
-		$dtstart = $task->start->setTimezone($now->getTimezone());
-		if ($dtstart < $now) {
-			return []; // past DTSTART: no relaxation; shared slots roll forward
-		}
+		$dtstart = $task->start->setTimezone($st->tz);
 		$day = $dtstart->setTime(0, 0, 0);
-		$wd = $working->forWeekday((int)$day->format('N') - 1);
-		$insideWorking = $wd !== null
-			&& $dtstart >= $day->modify('+' . $wd->startMinutes . ' minutes')
-			&& $dtstart < $day->modify('+' . $wd->endMinutes . ' minutes');
-		if ($insideWorking) {
-			return []; // shared working-hours pool already covers it
+		$wd = $st->working->forWeekday((int)$day->format('N') - 1);
+		$today = $st->now->setTime(0, 0, 0);
+		if ($wd === null || $day < $today || $day >= $today->modify('+' . $st->horizonDays . ' days')) {
+			return [];
 		}
-		$start = FreeSlotsService::snapUp($dtstart);
-		$dayEnd = $start->setTime(23, 59, 0);
-		if ($start >= $dayEnd) {
+		$workStart = $day->modify('+' . $wd->startMinutes . ' minutes');
+		$workEnd = $day->modify('+' . $wd->endMinutes . ' minutes');
+		if ($dtstart >= $workStart && $dtstart < $workEnd
+			&& PlanState::minutesBetween($dtstart, $workEnd) >= $task->estimatedMinutes) {
+			return []; // the shared working-hours pool covers it
+		}
+		$from = FreeSlotsService::snapUp($dtstart > $st->now ? $dtstart : $st->now->setTimezone($st->tz));
+		$dayEnd = FreeSlotsService::snapDown($day->setTime(23, 59, 0));
+		if ($from >= $dayEnd || $from->format('Y-m-d') !== $day->format('Y-m-d')) {
 			return [];
 		}
 		$out = [];
-		foreach (FreeSlotsService::subtractBusy(new Slot($start, $dayEnd), $busy) as $s) {
-			$snapped = new Slot($s->start, FreeSlotsService::snapDown($s->end));
+		foreach (FreeSlotsService::subtractBusy(new Slot($from, $dayEnd), array_merge($st->busy, $st->placed)) as $s) {
+			$snapped = new Slot(FreeSlotsService::snapUp($s->start), FreeSlotsService::snapDown($s->end));
 			if ($snapped->start < $snapped->end && $snapped->durationMinutes() >= $task->estimatedMinutes) {
 				$out[] = $snapped;
 			}
@@ -185,99 +180,100 @@ class SchedulerService {
 	}
 
 	/**
-	 * Place *task* in the earliest fitting slot; consume it. Tries to honour the
-	 * due date first (slot must end <= DUE). If that is impossible:
-	 *  - when DUE is in the future -> DUE supersedes calplan: SKIP (return null),
-	 *    so no slot is ever written that overruns a reachable due date;
-	 *  - when DUE has already passed (overdue) or is absent -> roll over to the
-	 *    earliest fitting slot regardless of DUE, placing the
-	 *    overdue task ASAP — never in the past (free slots start at $now).
-	 * 1.5.5: a DTSTART outside working hours relaxes working hours for this one
-	 * task (dtstartSlots competes with the shared pool); the earliest valid fit
-	 * across both wins. Returns the placed Slot, or null if nothing fits.
+	 * Place *task* whole in the earliest fitting slot (pool or DTSTART window)
+	 * and take that time. A future DUE is a hard limit: a task that cannot end
+	 * by it is skipped (null), so no block ever overruns a reachable due date.
+	 * An overdue or undated task rolls forward to the earliest fit (free slots
+	 * start at now, never in the past).
 	 *
-	 * @param Slot[]            $slots
-	 * @param array<string,int> $dailyUsed
-	 * @param BusyBlock[]       $busy
+	 * @param Slot[] $extra
+	 * @param array{count: bool} $why
 	 */
-	private function place(Task $task, array &$slots, array &$dailyUsed, int $dailyCap, \DateTimeImmutable $now, array $busy, WorkingHours $working, int $taskGapMinutes = 0, array &$dailyCountUsed = [], int $dailyTaskCount = 0, ?bool &$countRejected = null): ?Slot {
-		$extra = $this->dtstartSlots($task, $now, $busy, $working);
-		$best = $this->earliestSource($slots, $extra, $task, $dailyUsed, $dailyCap, true, $dailyCountUsed, $dailyTaskCount, $countRejected);
-		if ($best === null) {
-			$overdueOrNoDue = $task->due === null || $task->due <= $now;
-			if ($overdueOrNoDue) {
-				$best = $this->earliestSource($slots, $extra, $task, $dailyUsed, $dailyCap, false, $dailyCountUsed, $dailyTaskCount, $countRejected);
-			}
+	private function place(PlanState $st, Task $task, array $extra, array &$why): ?Slot {
+		$block = $this->earliestFit($st, $extra, $task, $task->due !== null && $task->due > $st->now, $why);
+		if ($block !== null) {
+			$st->charge($st->day($block->start), $task->estimatedMinutes);
+			$st->occupy($block);
 		}
-		if ($best === null) {
-			return null;
-		}
-
-		$usableStart = $best['start'];
-		$placedEnd = $best['end'];
-		$placed = new Slot($usableStart, $placedEnd);
-
-		$dayKey = $usableStart->setTime(0, 0, 0)->format('Y-m-d');
-		$dailyUsed[$dayKey] = ($dailyUsed[$dayKey] ?? 0) + $task->estimatedMinutes;
-		$dailyCountUsed[$dayKey] = ($dailyCountUsed[$dayKey] ?? 0) + 1;
-
-		// Consume from the shared pool only; DTSTART slots are per-task throwaway.
-		if ($best['shared']) {
-			$src = $slots[$best['i']];
-			array_splice($slots, (int)$best['i'], 1);
-			$previousAvailable = $taskGapMinutes > 0 ? $usableStart->modify('-' . $taskGapMinutes . ' minutes') : $usableStart;
-			if ($previousAvailable > $src->start) {
-				$prefix = new Slot($src->start, $previousAvailable);
-				if ($prefix->durationMinutes() >= Defaults::SLOT_GRANULARITY_MINUTES) {
-					$this->insertSorted($slots, $prefix);
-				}
-			}
-			$nextAvailable = $taskGapMinutes > 0 ? $placedEnd->modify('+' . $taskGapMinutes . ' minutes') : $placedEnd;
-			if ($src->end > $nextAvailable) {
-				$suffix = new Slot($nextAvailable, $src->end);
-				if ($suffix->durationMinutes() >= Defaults::SLOT_GRANULARITY_MINUTES) {
-					$this->insertSorted($slots, $suffix);
-				}
-			}
-		}
-		return $placed;
+		return $block;
 	}
 
 	/**
-	 * Compute detailed placement outcomes, including a stable reason when a task
-	 * cannot be placed. The compatibility schedule() method below unwraps slots.
+	 * Placement order: missed deadline first (a missed DUE outranks a missed
+	 * DTSTART, which outranks every on-track task, plan 1.6.3), then weighted
+	 * EDF by score desc, then the exact deadline, then SPT (shorter first),
+	 * then the UID, so that equal tasks always come in the same order.
 	 *
-	 * @param Task[]      $tasks
-	 * @param BusyBlock[] $busy
-	 * @return array<string, PlacementResult>
+	 * @param Task[] $candidates
+	 * @return Task[]
 	 */
-	public function scheduleDetailed(array $tasks, WorkingHours $working, array $busy, \DateTimeImmutable $now, int $horizonDays = Defaults::LOOKAHEAD_DAYS, int $dailyCap = Defaults::DEFAULT_DAILY_CAP_MINUTES, int $taskGapMinutes = 0, int $dailyTaskCount = 0, array &$dailyCountUsed = []): array {
-		$candidates = $this->eligible($tasks);
-		// Missed-deadline tasks first, then weighted-EDF by score desc; SPT tiebreak
-		// (shorter jobs first) by estimate asc. A missed DUE (overdue) outranks a
-		// missed DTSTART, which outranks every on-track task (plan 1.6.3).
+	private function placementOrder(array $candidates, \DateTimeImmutable $now): array {
 		usort($candidates, function (Task $a, Task $b) use ($now): int {
 			$byTier = $this->urgencyTier($a, $now) <=> $this->urgencyTier($b, $now);
 			if ($byTier !== 0) {
 				return $byTier;
 			}
 			$byScore = $this->rankingScore($b, $now) <=> $this->rankingScore($a, $now);
-			return $byScore !== 0 ? $byScore : ($a->estimatedMinutes <=> $b->estimatedMinutes);
+			if ($byScore !== 0) {
+				return $byScore;
+			}
+			$byDue = ($a->due?->getTimestamp() ?? PHP_INT_MAX) <=> ($b->due?->getTimestamp() ?? PHP_INT_MAX);
+			if ($byDue !== 0) {
+				return $byDue;
+			}
+			$byLength = $a->estimatedMinutes <=> $b->estimatedMinutes;
+			return $byLength !== 0 ? $byLength : strcmp($a->id, $b->id);
 		});
+		return $candidates;
+	}
+
+	/**
+	 * Compute detailed placement outcomes, including a stable reason when a task
+	 * cannot be placed. The compatibility schedule() method below unwraps slots.
+	 *
+	 * *pinned* holds, by task id, a block that has already started: it stays
+	 * as it is (a task in progress is not moved away while it is being worked
+	 * on, and the expired-block review can see it end), holds its time and
+	 * counts against its day's limits. *spent* is block time already used
+	 * today by blocks that no longer exist or are being removed (completed
+	 * tasks, moved blocks): it counts against today's limits too.
+	 *
+	 * @param Task[]      $tasks
+	 * @param BusyBlock[] $busy
+	 * @param array<string, Slot> $pinned
+	 * @param list<array{day: string, minutes: int}> $spent
+	 * @return array<string, PlacementResult>
+	 */
+	public function scheduleDetailed(array $tasks, WorkingHours $working, array $busy, \DateTimeImmutable $now, int $horizonDays = Defaults::LOOKAHEAD_DAYS, int $dailyCap = Defaults::DEFAULT_DAILY_CAP_MINUTES, int $taskGapMinutes = 0, int $dailyTaskCount = 0, array $pinned = [], array $spent = []): array {
+		$tz = $now->getTimezone();
+		// The same instants in the user's timezone: days are always the user's.
+		$tasks = array_map(fn (Task $t) => $t->withTimesIn($tz), $tasks);
+		$candidates = $this->placementOrder($this->eligible($tasks), $now);
 
 		$minEst = Defaults::DEFAULT_ESTIMATE_MINUTES;
 		foreach ($candidates as $t) {
 			$minEst = min($minEst, $t->estimatedMinutes);
 		}
-		$slots = FreeSlotsService::freeSlots($working, $busy, $now, $horizonDays, $minEst);
+		$st = new PlanState($now, $working, $busy, $horizonDays, $dailyCap, $dailyTaskCount, $taskGapMinutes,
+			FreeSlotsService::freeSlots($working, $busy, $now, $horizonDays, $minEst));
+		foreach ($spent as $entry) {
+			$st->charge($entry['day'], $entry['minutes']);
+		}
+		$pins = [];
+		foreach ($candidates as $task) {
+			if (isset($pinned[$task->id])) {
+				$block = new Slot($pinned[$task->id]->start->setTimezone($tz), $pinned[$task->id]->end->setTimezone($tz));
+				$pins[$task->id] = $block;
+				$st->charge($st->day($block->start), PlanState::minutesBetween($block->start, $block->end));
+				$st->occupy($block);
+			}
+		}
 
-		$dailyUsed = [];
 		$outcomes = [];
 		foreach ($candidates as $task) {
-			$countRejected = false;
-			$slot = $this->place($task, $slots, $dailyUsed, $dailyCap, $now, $busy, $working, $taskGapMinutes, $dailyCountUsed, $dailyTaskCount, $countRejected);
-			$reason = $slot === null ? ($countRejected ? 'daily_task_count_reached' : $this->unscheduledReason($task, $working, $now, $horizonDays, $dailyCap)) : null;
-			$outcomes[$task->id] = new PlacementResult($slot, $reason);
+			$why = ['count' => false];
+			$block = $pins[$task->id] ?? $this->place($st, $task, $this->dtstartSlots($st, $task), $why);
+			$outcomes[$task->id] = new PlacementResult($block, $block === null ? $this->unscheduledReason($task, $st, $why) : null);
 		}
 		return $outcomes;
 	}
@@ -285,21 +281,26 @@ class SchedulerService {
 	/** @return array<string, Slot|null> */
 	public function schedule(array $tasks, WorkingHours $working, array $busy, \DateTimeImmutable $now, int $horizonDays = Defaults::LOOKAHEAD_DAYS, int $dailyCap = Defaults::DEFAULT_DAILY_CAP_MINUTES, int $taskGapMinutes = 0, int $dailyTaskCount = 0): array {
 		$out = [];
-		$dailyCountUsed = [];
-		foreach ($this->scheduleDetailed($tasks, $working, $busy, $now, $horizonDays, $dailyCap, $taskGapMinutes, $dailyTaskCount, $dailyCountUsed) as $taskId => $result) {
-			$out[$taskId] = $result->slot;
+		foreach ($this->scheduleDetailed($tasks, $working, $busy, $now, $horizonDays, $dailyCap, $taskGapMinutes, $dailyTaskCount) as $taskId => $result) {
+			$out[(string)$taskId] = $result->slot;
 		}
 		return $out;
 	}
 
-	private function unscheduledReason(Task $task, WorkingHours $working, \DateTimeImmutable $now, int $horizonDays, int $dailyCap): string {
-		$horizonEnd = $now->setTime(0, 0)->modify('+' . $horizonDays . ' days');
+	/** @param array{count: bool} $why */
+	private function unscheduledReason(Task $task, PlanState $st, array $why): string {
+		// A rejection by the block count is only noted where the time itself
+		// would have fitted (before a reachable deadline).
+		if ($why['count']) {
+			return 'daily_task_count_reached';
+		}
+		$horizonEnd = $st->now->setTime(0, 0)->modify('+' . $st->horizonDays . ' days');
 		if ($task->start !== null && $task->start >= $horizonEnd) {
 			return 'starts_after_horizon';
 		}
 		$maxWindow = 0;
 		for ($weekday = 0; $weekday < 7; $weekday++) {
-			$day = $working->forWeekday($weekday);
+			$day = $st->working->forWeekday($weekday);
 			if ($day !== null) {
 				$maxWindow = max($maxWindow, $day->endMinutes - $day->startMinutes);
 			}
@@ -307,13 +308,13 @@ class SchedulerService {
 		if ($maxWindow === 0) {
 			return 'no_working_hours';
 		}
-		if ($task->estimatedMinutes > $dailyCap) {
+		if ($task->estimatedMinutes > $st->dailyCap) {
 			return 'duration_exceeds_daily_cap';
 		}
 		if ($task->estimatedMinutes > $maxWindow && $task->start === null) {
 			return 'duration_exceeds_openings';
 		}
-		if ($task->due !== null && $task->due > $now) {
+		if ($task->due !== null && $task->due > $st->now) {
 			return 'no_fit_before_due';
 		}
 		return 'no_capacity_within_horizon';

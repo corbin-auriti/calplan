@@ -95,27 +95,32 @@ class ConfigController extends OCSController {
 		return new DataResponse(['workingHours' => $workingHours]);
 	}
 
+	/**
+	 * Set the scheduling policy. A setting left out of the request keeps its
+	 * current value (an older settings page does not send the newer ones).
+	 */
 	#[NoAdminRequired]
 	public function setSchedulingPolicy(
-		int $dailyCapMinutes = 300,
-		int $defaultDurationMinutes = 30,
-		int $taskGapMinutes = 0,
-		int $eventBufferMinutes = 0,
-		string $pacePreset = 'compact',
-		int $autoRescheduleMinutes = 15,
-		int $dailyTaskCount = 0,
+		?int $dailyCapMinutes = null,
+		?int $defaultDurationMinutes = null,
+		?int $taskGapMinutes = null,
+		?int $eventBufferMinutes = null,
+		?string $pacePreset = null,
+		?int $autoRescheduleMinutes = null,
+		?int $dailyTaskCount = null,
 	): DataResponse {
 		$uid = $this->userId();
+		$current = $this->configService->getSchedulingPolicy($uid);
 		try {
 			$this->configService->setSchedulingPolicy(
 				$uid,
-				$dailyCapMinutes,
-				$defaultDurationMinutes,
-				$taskGapMinutes,
-				$eventBufferMinutes,
-				$pacePreset,
-				$autoRescheduleMinutes,
-				$dailyTaskCount,
+				$dailyCapMinutes ?? $current['dailyCapMinutes'],
+				$defaultDurationMinutes ?? $current['defaultDurationMinutes'],
+				$taskGapMinutes ?? $current['taskGapMinutes'],
+				$eventBufferMinutes ?? $current['eventBufferMinutes'],
+				$pacePreset ?? $current['pacePreset'],
+				$autoRescheduleMinutes ?? $current['autoRescheduleMinutes'],
+				$dailyTaskCount ?? $current['dailyTaskCount'],
 			);
 		} catch (\InvalidArgumentException $e) {
 			return new DataResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);

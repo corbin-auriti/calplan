@@ -29,8 +29,24 @@
 	width: 100%;
 	color: var(--color-text-lighter);
 	display: flex;
+	align-items: center;
 	cursor: pointer;
 	transition: background-color 0.15s ease;
+}
+
+/* Hidden while no task is open (the [hidden] rule beats `display: flex`). */
+.property__item.calplan-toggle-row[hidden] {
+	display: none !important;
+}
+
+/* A task Tasks cannot save (read-only or non-public shared calendar). */
+.property__item.calplan-toggle-row.is-disabled {
+	cursor: default;
+	opacity: 0.6;
+}
+
+.property__item.calplan-toggle-row.is-disabled:hover {
+	background-color: transparent;
 }
 
 .property__item.calplan-toggle-row:hover {
@@ -64,10 +80,15 @@
 
 .property__item.calplan-toggle-row .content__name {
 	flex-grow: 1;
+	min-width: 0;
 	padding-right: 14px;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.property__item.calplan-toggle-row .calplan-switch-wrapper {
+	margin-inline-end: 8px;
 }
 
 .property__item.calplan-toggle-row .item__actions {
@@ -206,7 +227,7 @@
 	transform: translateX(16px);
 }
 
-.property__item.calplan-toggle-row:focus-visible {
+.property__item.calplan-toggle-row [role="switch"]:focus-visible {
 	box-shadow: inset 0 0 0 2px var(--color-primary-element-light, rgba(0, 130, 201, 0.4));
 	outline: none;
 	border-radius: 2px;
@@ -287,3 +308,4 @@
 @keyframes calplan-reconcile-spin {
 	to { transform: rotate(360deg); }
 }
+

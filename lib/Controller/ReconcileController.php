@@ -6,19 +6,17 @@ declare(strict_types=1);
  * SPDX-FileCopyrightText: 2026 Nextcloud contributors
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * OCS endpoint to trigger a reconciliation pass for the calling user on demand
- * ("Schedule now"). This exists because the cron-driven first-run sweep can
- * hold the SQLite write lock long enough to block concurrent writers; driving
- * ReconcileService::reconcileUser() directly in the request avoids that and is
- * also the path the Playwright E2E uses to exercise the scheduling pipeline
- * end-to-end without waiting for cron.
+ * OCS endpoints to run a reconciliation pass for the calling user on demand
+ * (the Reconcile button) and to read the latest run's status. Driving
+ * ReconcileService::reconcileUser() directly in the request is also the path
+ * the Playwright E2E uses to exercise the scheduling pipeline end-to-end
+ * without waiting for cron.
  */
 
 namespace OCA\AutoSchedule\Controller;
 
-use OCA\AutoSchedule\Model\Reconciliation;
-use OCA\AutoSchedule\Service\ReconcileService;
 use OCA\AutoSchedule\Service\ConfigService;
+use OCA\AutoSchedule\Service\ReconcileService;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\DataResponse;
@@ -44,44 +42,39 @@ class ReconcileController extends OCSController {
 
 	/**
 	 * Run a reconciliation pass for the calling user now and report how many
-	 * working-slot events were (re)created or removed.
+	 * working-slot events were (re)created or removed by this very run.
 	 *
-	 * @return DataResponse<Http::STATUS_OK, array{reconciled: int, placed: int, removed: int}, array{}>
+	 * @return DataResponse<Http::STATUS_OK, array{reconciled: int, placed: int, removed: int, unscheduled: int}, array{}>
 	 *
 	 * 200: Reconciliation complete
 	 */
 	#[NoAdminRequired]
 	public function reconcileNow(): DataResponse {
 		$uid = $this->userId();
-		/** @var Reconciliation[] $results */
 		$results = $this->reconcileService->reconcileUser($uid, true, 'manual');
-		$placed = 0;
-		$removed = 0;
-		$unscheduled = [];
-		foreach ($results as $recon) {
-			$placed += count($recon->toPut);
-			$removed += count($recon->toDelete);
-			foreach ($recon->unscheduled as $reason) {
-				$unscheduled[$reason] = ($unscheduled[$reason] ?? 0) + 1;
-			}
-		}
-		$lastRun = $this->configService->getReconcileDiagnostics($uid)[0] ?? null;
+		$report = $this->reconcileService->lastReport();
 		return new DataResponse([
 			'reconciled' => count($results),
-			'placed' => is_array($lastRun) ? (int)($lastRun['placed'] ?? $placed) : $placed,
-			'removed' => is_array($lastRun) ? (int)($lastRun['removed'] ?? $removed) : $removed,
-			'unscheduled' => array_sum($unscheduled),
-			'unscheduledReasons' => $unscheduled,
-			'lastRun' => $lastRun,
+			// Null when the run was skipped because another one kept running.
+			'ran' => $report !== null,
+			'placed' => (int)($report['placed'] ?? 0),
+			'removed' => (int)($report['removed'] ?? 0),
+			'unscheduled' => (int)($report['unscheduled'] ?? 0),
+			'unscheduledReasons' => (object)($report['unscheduledReasons'] ?? []),
+			'lastRun' => $report ?? ($this->configService->getReconcileDiagnostics($uid)[0] ?? null),
+			'rewrittenTasks' => (object)$this->configService->getRewrittenTasks($uid, time()),
 		]);
 	}
 
 	#[NoAdminRequired]
 	public function getStatus(): DataResponse {
-		$reports = $this->configService->getReconcileDiagnostics($this->userId());
+		$uid = $this->userId();
+		$reports = $this->configService->getReconcileDiagnostics($uid);
 		return new DataResponse([
 			'lastRun' => $reports[0] ?? null,
 			'recentRuns' => $reports,
+			// Task UID => {uri, at}: tasks CalPlan rewrote, which an open Tasks page reloads.
+			'rewrittenTasks' => (object)$this->configService->getRewrittenTasks($uid, time()),
 		]);
 	}
 }

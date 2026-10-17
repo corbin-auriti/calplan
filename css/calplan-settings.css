@@ -8,9 +8,10 @@
 .calplan-settings-group__content { padding: 4px 18px 18px; }
 .calplan-setting-row { margin: 20px 0; }
 .calplan-setting-row > label { display: block; font-weight: 600; margin-bottom: 6px; }
-.calplan-setting-row input[type="number"], .calplan-setting-row select, .calplan-setting-row textarea { min-width: 260px; }
+.calplan-setting-row input[type="number"], .calplan-setting-row select, .calplan-setting-row textarea { min-width: min(260px, 100%); max-width: 100%; }
 .calplan-setting-row textarea { width: min(520px, 100%); resize: vertical; }
 #calplan-settings-status { margin-inline-start: 12px; }
+.calplan-save-status.is-unsaved { color: var(--color-warning-text, #8a6100); font-weight: 600; }
 .calplan-checkbox-row { display: flex; align-items: center; gap: 8px; }
 #calplan-personal-settings h3 { margin-top: 36px; }
 #calplan-history-status { display: inline-block; margin-inline-start: 12px; }

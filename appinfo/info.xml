@@ -6,7 +6,7 @@
     <summary>Your calendar, sorted — automatically place flagged tasks into free slots</summary>
     <description><![CDATA[CalPlan finds time for your Nextcloud tasks. Turn on **Auto-schedule** for a task and CalPlan adds a `🔒 Task title` time block to the first free place in your working hours. When you edit or finish the task, CalPlan updates or removes the block.
 
-**Important setup:** put scheduled tasks in a calendar/list that supports **both tasks and events** (`VTODO` + `VEVENT`). A Tasks-only list cannot store CalPlan's event block, and Tasks-only calendars may not appear in third-party calendar apps. In Nextcloud Tasks, choose a normal calendar that supports tasks—not a Tasks-only list.
+**Important setup:** put scheduled tasks in a calendar/list that supports **both tasks and events** (`VTODO` + `VEVENT`). No calendar shows an event stored in a Tasks-only list, so CalPlan gives such tasks no block and flags them as not scheduled. In Nextcloud Tasks, choose a normal calendar that supports tasks—not a Tasks-only list. CalPlan plans and writes only in your own calendars; calendars shared with you, subscriptions and federated calendars count as busy time.
 
 **How it works**
 1. Open a task in Nextcloud Tasks and turn on **Auto-schedule** (or add the standard `calplan` tag from another CalDAV client).

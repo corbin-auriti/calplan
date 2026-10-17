@@ -109,9 +109,9 @@ class IcalCodecSlotContentTest extends TestCase {
 	}
 
 	public function testStructuredDescriptionSubtaskLines(): void {
-		// hasChildren -> Subtasks: ↴ (priority 5 -> Priority: 5). No notes.
-		$t = $this->task(['hasChildren' => true]);
-		$this->assertSame("---Task---\nTitle: My task\nPriority: 5\nSubtasks: ↴", IcalCodec::structuredDescription($t));
+		// Subtasks: ↴ <title> (priority 5 -> Priority: 5). No notes.
+		$t = $this->task(['childTitles' => ['Lesson']]);
+		$this->assertSame("---Task---\nTitle: My task\nPriority: 5\nSubtasks: ↴ Lesson", IcalCodec::structuredDescription($t));
 	}
 
 	public function testStructuredDescriptionChildLine(): void {
@@ -167,30 +167,28 @@ class IcalCodecSlotContentTest extends TestCase {
 		$this->assertSame("---Task---\nTitle: Late\nStatus: ⏰ Overdue", $c['description']);
 	}
 
-	public function testRelationMarkParent(): void {
-		$this->assertSame('↴ ', IcalCodec::relationMark($this->task(['hasChildren' => true])));
-	}
-
-	public function testRelationMarkChild(): void {
-		$this->assertSame('↳ ', IcalCodec::relationMark($this->task(['parentUid' => 'parent-1'])));
-	}
-
-	public function testRelationMarkNone(): void {
-		$this->assertSame('', IcalCodec::relationMark($this->task()));
-	}
-
-	public function testRelationMarkParentWinsOverChild(): void {
-		// A mid-tree node (has children AND is itself a child) shows ↴.
-		$this->assertSame('↴ ', IcalCodec::relationMark($this->task(['hasChildren' => true, 'parentUid' => 'p'])));
-	}
-
 	public function testLiveSummaryParentRelation(): void {
 		$now = new \DateTimeImmutable('2026-08-19 08:00:00', new \DateTimeZone('UTC'));
-		$c = IcalCodec::slotContent($this->task(['hasChildren' => true, 'title' => 'Project']), $now);
+		$c = IcalCodec::slotContent($this->task(['childTitles' => ['Step'], 'title' => 'Project']), $now);
 		// 0.9.2: the ↴ subtask marker moved out of the SUMMARY into the
 		// DESCRIPTION ('Subtasks: ↴'); the SUMMARY keeps only the lock + title.
 		$this->assertSame('🔒 Project', $c['summary']);
-		$this->assertSame("---Task---\nTitle: Project\nPriority: 5\nSubtasks: ↴", $c['description']);
+		$this->assertSame("---Task---\nTitle: Project\nPriority: 5\nSubtasks: ↴ Step", $c['description']);
+	}
+
+	public function testContentSurvivesAWriteAndAReadUnchanged(): void {
+		// A URL's commas are percent-encoded (Sabre escapes them on write and
+		// keeps the escape on read), line breaks are LF, and "0" is a value.
+		$c = IcalCodec::slotContent($this->task(['url' => 'https://en.wikipedia.org/wiki/Washington,_D.C.', 'location' => '0', 'description' => "a\r\nb\rc"]));
+		$this->assertSame('https://en.wikipedia.org/wiki/Washington%2C_D.C.', $c['url']);
+		$this->assertSame('0', $c['location']);
+		$this->assertSame("5% - a\nb\nc", IcalCodec::slotContent($this->task(['description' => "a\r\nb\rc", 'percentComplete' => 5]))['description']);
+	}
+
+	public function testAPrivateTaskGivesAPrivateBlock(): void {
+		$t = new Task(id: 'T', title: 'Secret', classification: 'PRIVATE');
+		$this->assertSame('PRIVATE', IcalCodec::slotContent($t)['classification']);
+		$this->assertNull(IcalCodec::slotContent(new Task(id: 'T', title: 'Open', classification: 'PUBLIC'))['classification']);
 	}
 
 	public function testStructuredDescriptionFull(): void {

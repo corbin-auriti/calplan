@@ -26,8 +26,11 @@ class Defaults {
 	/** Plan at most two weeks ahead. */
 	public const LOOKAHEAD_DAYS = 14;
 
-	/** Tasks with no due date sort after every dated task but still get placed. */
-	public const NO_DUE_HORIZON_DAYS = self::LOOKAHEAD_DAYS;
+	/**
+	 * Tasks with no due date sort after every dated task but still get placed:
+	 * ranked as if due this many days ahead, far beyond any planning window.
+	 */
+	public const NO_DUE_HORIZON_DAYS = 3650;
 
 	/** The standard iCalendar CATEGORIES value that flags a task for scheduling. */
 	public const FLAG_CATEGORY = 'calplan';
@@ -43,19 +46,23 @@ class Defaults {
 
 	/**
 	 * Map a VTODO priority (1 highest … 9 lowest, 0 = no priority) to a
-	 * scheduling weight. No priority (0) ranks like the lowest set band so an
-	 * un-prioritised task does not jump the queue of explicitly prioritised work
-	 * (plan 0.9.1: absent PRIORITY is now parsed as 0, not 5).
+	 * scheduling weight that falls with the priority: Nextcloud Tasks writes
+	 * high = 1, medium = 5 and low = 9. No priority (0, plan 0.9.1: an absent
+	 * PRIORITY is parsed as 0, not 5) ranks like medium, so an un-prioritised
+	 * task neither jumps the queue of high-priority work nor sinks below tasks
+	 * explicitly marked low.
 	 */
 	public static function priorityWeight(int $priority): float {
 		return match ($priority) {
-			0 => 1.0,
 			1 => 5.0,
 			2 => 4.0,
 			3 => 3.0,
 			4 => 2.0,
-			5 => 1.0,
-			default => 3.0,
+			6 => 0.8,
+			7 => 0.6,
+			8 => 0.4,
+			9 => 0.2,
+			default => 1.0,
 		};
 	}
 }

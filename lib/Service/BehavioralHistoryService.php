@@ -26,6 +26,10 @@ class BehavioralHistoryService {
 	}
 
 	public function recordScheduled(string $userId, Task $task, Slot $slot, \DateTimeImmutable $at): void {
+		// Nothing is computed (no title shape, no HMAC, no salt) while history is off.
+		if (!$this->config->isBehavioralHistoryEnabled($userId)) {
+			return;
+		}
 		$titleShape = self::titleShapeMetadata($task->title);
 		$this->appendChanged($userId, $task->id, 'scheduled|' . $slot->start->format(DATE_ATOM) . '|' . $slot->end->format(DATE_ATOM) . '|' . json_encode($titleShape), [
 			'v' => 1,
@@ -42,6 +46,9 @@ class BehavioralHistoryService {
 	}
 
 	public function recordUnscheduled(string $userId, Task $task, string $reason, \DateTimeImmutable $at): void {
+		if (!$this->config->isBehavioralHistoryEnabled($userId)) {
+			return;
+		}
 		$titleShape = self::titleShapeMetadata($task->title);
 		$this->appendChanged($userId, $task->id, 'unscheduled|' . $reason . '|' . json_encode($titleShape), [
 			'v' => 1,
@@ -118,6 +125,9 @@ class BehavioralHistoryService {
 		];
 	}
 	public function recordRemoved(string $userId, string $taskUid, \DateTimeImmutable $at): void {
+		if (!$this->config->isBehavioralHistoryEnabled($userId)) {
+			return;
+		}
 		$this->appendChanged($userId, $taskUid, 'removed', [
 			'v' => 1,
 			'at' => $at->format(DATE_ATOM),
@@ -133,11 +143,21 @@ class BehavioralHistoryService {
 		}
 	}
 
+	/** Drop the months older than the user's retention, whether or not collection is on. */
+	public function pruneUser(string $userId): void {
+		$folder = $this->userFolder($userId, false);
+		if ($folder !== null) {
+			$this->prune($folder, $this->config->getBehavioralHistoryRetentionDays($userId));
+		}
+	}
+
 	/** @return array{path:string,records:int} */
 	public function export(string $userId): array {
 		$lines = [];
 		$folder = $this->userFolder($userId, false);
 		if ($folder !== null) {
+			// Never export what the retention already gave up.
+			$this->prune($folder, $this->config->getBehavioralHistoryRetentionDays($userId));
 			$files = $folder->getDirectoryListing();
 			usort($files, fn ($a, $b) => $a->getName() <=> $b->getName());
 			foreach ($files as $file) {

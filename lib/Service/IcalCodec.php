@@ -20,15 +20,29 @@ use OCA\AutoSchedule\Model\Defaults;
 use OCA\AutoSchedule\Model\Task;
 use Sabre\VObject\Component;
 use Sabre\VObject\Component\VCalendar;
+use Sabre\VObject\DateTimeParser;
 use Sabre\VObject\Reader;
+use Sabre\VObject\Settings;
 
 class IcalCodec {
 	/**
+	 * Most occurrences of one recurring event Sabre may walk through. Sabre
+	 * counts from the first occurrence, so its default (3500) silently drops
+	 * a daily event that started about ten years ago.
+	 */
+	private const MAX_RECURRENCES = 50000;
+
+	/**
 	 * Parse VTODO components from an iCalendar blob into Task objects.
+	 *
+	 * All-day (DATE) and floating values are read in *tz*, the user's
+	 * timezone: a DUE of 2026-10-21 is that day's midnight for the user. A
+	 * recurring task is not expanded: only its master component counts, not
+	 * the overridden occurrences (RECURRENCE-ID) a client may store with it.
 	 *
 	 * @return Task[]
 	 */
-	public static function parseTasks(string $ics, int $defaultEstimateMinutes = Defaults::DEFAULT_ESTIMATE_MINUTES): array {
+	public static function parseTasks(string $ics, int $defaultEstimateMinutes = Defaults::DEFAULT_ESTIMATE_MINUTES, ?\DateTimeZone $tz = null): array {
 		$vcal = Reader::read($ics);
 		if (!($vcal instanceof VCalendar)) {
 			return [];
@@ -36,10 +50,10 @@ class IcalCodec {
 		$tasks = [];
 		foreach ($vcal->select('VTODO') as $vtodo) {
 			$uid = self::stringProp($vtodo, 'UID');
-			if ($uid === '') {
+			if ($uid === '' || isset($vtodo->{'RECURRENCE-ID'})) {
 				continue;
 			}
-			$title = self::stringProp($vtodo, 'SUMMARY') ?: $uid;
+			$title = self::nonEmpty(self::stringProp($vtodo, 'SUMMARY')) ?? $uid;
 			$priorityRaw = self::stringProp($vtodo, 'PRIORITY');
 			// RFC 5545: an absent PRIORITY means "unspecified" (no priority), NOT
 			// medium (5). The Tasks app writes no PRIORITY unless the user sets
@@ -47,12 +61,13 @@ class IcalCodec {
 			// Priority:/!-mark output (plan 0.9.1). Scheduling weight is preserved
 			// (priorityWeight(0) == priorityWeight(5) == 1.0).
 			$priority = $priorityRaw !== '' ? (int)$priorityRaw : 0;
-			$due = self::dateTimeProp($vtodo, 'DUE');
-			$start = self::dateTimeProp($vtodo, 'DTSTART');
-			$status = strtoupper(self::stringProp($vtodo, 'STATUS') ?: 'NEEDS-ACTION');
+			$due = self::dateTimeProp($vtodo, 'DUE', $tz);
+			$start = self::dateTimeProp($vtodo, 'DTSTART', $tz);
+			// An all-day start (VALUE=DATE) means "from that day", not a time.
+			$startAllDay = $start !== null && self::isDateOnly($vtodo, 'DTSTART');
+			$status = strtoupper(self::nonEmpty(self::stringProp($vtodo, 'STATUS')) ?? 'NEEDS-ACTION');
 			$categories = self::categories($vtodo);
-			$autoSchedule = in_array(Defaults::FLAG_CATEGORY, $categories, true);
-			$description = self::stringProp($vtodo, 'DESCRIPTION') ?: null;
+			$description = self::nonEmpty(self::stringProp($vtodo, 'DESCRIPTION'));
 			$durationRaw = self::stringProp($vtodo, 'DURATION');
 			// Prefer the standard RFC 5545 property. Nextcloud Tasks has no
 			// duration field, so a simple `Duration: 15min` notes line is the
@@ -63,36 +78,28 @@ class IcalCodec {
 			if ($estimatedMinutes <= 0) {
 				$estimatedMinutes = $defaultEstimateMinutes;
 			}
-			$location = self::stringProp($vtodo, 'LOCATION') ?: null;
-			$url = self::stringProp($vtodo, 'URL') ?: null;
 			$percentRaw = self::stringProp($vtodo, 'PERCENT-COMPLETE');
-			$percentComplete = $percentRaw !== '' ? (int)$percentRaw : null;
-			// Parent/child: the Tasks app marks a child VTODO with
-			// RELATED-TO;RELTYPE=PARENT:<parent-uid> (a RELATED-TO with no RELTYPE
-			// is also a parent link). "Has children" is resolved across the whole
-			// calendar in CalendarRepository::getTasks (plan 0.9.1).
-			$parentUid = self::relatedToParent($vtodo);
 			$tasks[] = new Task(
-				$uid,
-				$title,
-				$priority,
-				$due,
-				$start,
-				$estimatedMinutes,
-				$autoSchedule,
-				$status,
-				$description,
-				$location,
-				$url,
-				$percentComplete,
-				null,
-				null,
-				$parentUid,
-				false,
-				null,
-				[],
-				null,
-				$categories,
+				id: $uid,
+				title: $title,
+				priority: $priority,
+				due: $due,
+				start: $start,
+				estimatedMinutes: $estimatedMinutes,
+				autoSchedule: Task::hasCategory($categories, Defaults::FLAG_CATEGORY),
+				status: $status,
+				description: $description,
+				location: self::nonEmpty(self::stringProp($vtodo, 'LOCATION')),
+				url: self::nonEmpty(self::stringProp($vtodo, 'URL')),
+				percentComplete: $percentRaw !== '' ? (int)$percentRaw : null,
+				// Parent/child: the Tasks app marks a child VTODO with
+				// RELATED-TO;RELTYPE=PARENT:<parent-uid> (a RELATED-TO with no
+				// RELTYPE is also a parent link). The relationships are resolved
+				// across the whole calendar in CalendarRepository::getTasks (plan 0.9.1).
+				parentUid: self::relatedToParent($vtodo),
+				categories: $categories,
+				startAllDay: $startAllDay,
+				classification: self::nonEmpty(strtoupper(trim(self::stringProp($vtodo, 'CLASS')))),
 			);
 		}
 		return $tasks;
@@ -101,12 +108,31 @@ class IcalCodec {
 	/**
 	 * Parse VEVENT components from an iCalendar blob into CalendarEvent objects.
 	 *
+	 * With a [$from, $until] window, recurring events (RRULE/RDATE) are
+	 * expanded into their occurrences inside it (EXDATEs and overridden
+	 * instances honoured): the stored VEVENT only carries the first
+	 * occurrence, so without expansion a daily lunch would count as busy on
+	 * its first date only. All-day and floating times are read in *tz*, the
+	 * user's timezone. An event without DTEND lasts its DURATION, or a whole
+	 * day when it is all-day (RFC 5545 3.6.1).
+	 *
 	 * @return CalendarEvent[]
 	 */
-	public static function parseEvents(string $ics): array {
+	public static function parseEvents(string $ics, ?\DateTimeInterface $from = null, ?\DateTimeInterface $until = null, ?\DateTimeZone $tz = null, ?string $objectUri = null): array {
 		$vcal = Reader::read($ics);
 		if (!($vcal instanceof VCalendar)) {
 			return [];
+		}
+		if ($from !== null && $until !== null && self::hasRecurringEvent($vcal)) {
+			$maxRecurrences = Settings::$maxRecurrences;
+			Settings::$maxRecurrences = max($maxRecurrences, self::MAX_RECURRENCES);
+			try {
+				$vcal = $vcal->expand($from, $until, $tz);
+			} catch (\Throwable $_) {
+				// No instances in range, or too many: keep the unexpanded master.
+			} finally {
+				Settings::$maxRecurrences = $maxRecurrences;
+			}
 		}
 		$events = [];
 		foreach ($vcal->select('VEVENT') as $vevent) {
@@ -114,15 +140,18 @@ class IcalCodec {
 			if ($uid === '') {
 				continue;
 			}
-			$start = self::dateTimeProp($vevent, 'DTSTART');
+			$start = self::dateTimeProp($vevent, 'DTSTART', $tz);
 			if ($start === null) {
 				continue;
 			}
-			$end = self::dateTimeProp($vevent, 'DTEND') ?? $start;
+			$end = self::eventEnd($vevent, $start, $tz);
+			if ($end < $start) {
+				continue; // a reversed event holds no time
+			}
 			$categories = self::categories($vevent);
 			$relatedTaskUid = self::relatedToTodo($vevent);
 			$isOwnedSlot = str_starts_with($uid, Defaults::SLOT_UID_PREFIX)
-				&& (in_array(Defaults::SLOT_CATEGORY, $categories, true) || $relatedTaskUid !== null);
+				&& (Task::hasCategory($categories, Defaults::SLOT_CATEGORY) || $relatedTaskUid !== null);
 			$autoTaskUid = $isOwnedSlot
 				? ($relatedTaskUid ?? substr($uid, strlen(Defaults::SLOT_UID_PREFIX)))
 				: null;
@@ -130,24 +159,43 @@ class IcalCodec {
 			// reconciler can detect content-only edits (plan 1.5.11). The
 			// raw DESCRIPTION (incl. the % prefix) is compared to slotContent().
 			$transpRaw = self::stringProp($vevent, 'TRANSP');
-			$transp = $transpRaw !== '' ? strtoupper($transpRaw) : null;
+			$transp = $transpRaw !== '' ? strtoupper(trim($transpRaw)) : null;
 			// Ordinary event summaries are needed for the user's busy-title
 			// exclusions. Other mirrored content is read only for owned slots.
-			$summary = self::stringProp($vevent, 'SUMMARY') ?: null;
+			$summary = self::nonEmpty(self::stringProp($vevent, 'SUMMARY'));
 			$description = null;
 			$location = null;
 			$url = null;
 			$priority = null;
+			$classification = null;
 			if ($autoTaskUid !== null) {
-				$description = self::stringProp($vevent, 'DESCRIPTION') ?: null;
-				$location = self::stringProp($vevent, 'LOCATION') ?: null;
-				$url = self::stringProp($vevent, 'URL') ?: null;
+				$description = self::nonEmpty(self::stringProp($vevent, 'DESCRIPTION'));
+				$location = self::nonEmpty(self::stringProp($vevent, 'LOCATION'));
+				$url = self::nonEmpty(self::stringProp($vevent, 'URL'));
 				$priRaw = self::stringProp($vevent, 'PRIORITY');
 				$priority = $priRaw !== '' ? (int)$priRaw : null;
+				$classification = self::nonEmpty(strtoupper(trim(self::stringProp($vevent, 'CLASS'))));
 			}
-			$events[] = new CalendarEvent($uid, $start, $end, $autoTaskUid, $summary, $description, $location, $url, $priority, transp: $transp);
+			$events[] = new CalendarEvent($uid, $start, $end, $autoTaskUid, $summary, $description, $location, $url, $priority, transp: $transp, objectUri: $objectUri, classification: $classification);
 		}
 		return $events;
+	}
+
+	/** When *vevent* ends: DTEND, else DTSTART + DURATION, else the next day for an all-day event, else its start. */
+	private static function eventEnd(Component $vevent, \DateTimeImmutable $start, ?\DateTimeZone $tz): \DateTimeImmutable {
+		$end = self::dateTimeProp($vevent, 'DTEND', $tz);
+		if ($end !== null) {
+			return $end;
+		}
+		$duration = self::stringProp($vevent, 'DURATION');
+		if ($duration !== '') {
+			try {
+				return $start->add(DateTimeParser::parseDuration($duration));
+			} catch (\Throwable $_) {
+				// An invalid DURATION: treat the event as instantaneous.
+			}
+		}
+		return self::isDateOnly($vevent, 'DTSTART') ? $start->modify('+1 day') : $start;
 	}
 
 	/**
@@ -155,7 +203,10 @@ class IcalCodec {
 	 * the reconciler expects to find it on an existing slot. Pure and
 	 * Sabre-independent, so it drives both buildSlotEvent (write) and the
 	 * reconciler content-change detection (compare). A null value means the
-	 * property is omitted from the VEVENT.
+	 * property is omitted from the VEVENT. Values are normalised the way they
+	 * survive a write and a read: line breaks as LF, commas in the URL
+	 * percent-encoded (Sabre escapes a URL's commas on write but does not
+	 * unescape them on read), so an unchanged block is never rewritten.
 	 *
 	 * Two render modes (plan 0.9.1):
 	 *  - $now === null  -> legacy/pure-test callers: raw title, simple % prefix.
@@ -165,22 +216,24 @@ class IcalCodec {
 	 *    title visible in narrow day-view blocks); the DESCRIPTION is a
 	 *    structured block (---Task--- / ---Notes---). See the helper docblocks.
 	 *
-	 * @return array{summary:string,description:?string,location:?string,url:?string,priority:?int}
+	 * @return array{summary:string,description:?string,location:?string,url:?string,priority:?int,classification:?string}
 	 */
 	public static function slotContent(Task $task, ?\DateTimeImmutable $now = null): array {
+		$common = [
+			'location' => self::nonEmpty(self::lineBreaks($task->location)),
+			'url' => self::nonEmpty(str_replace(',', '%2C', (string)$task->url)),
+			'priority' => $task->priority > 0 ? $task->priority : null,
+			// A private or confidential task's blocks are hidden from sharees
+			// like the task itself (Nextcloud filters by CLASS).
+			'classification' => in_array($task->classification, ['PRIVATE', 'CONFIDENTIAL'], true) ? $task->classification : null,
+		];
 		if ($now === null) {
 			// Legacy/pure-test path: raw title, simple % prefix (unchanged).
 			$desc = $task->description ?? '';
 			if ($task->percentComplete !== null && $task->percentComplete > 0) {
 				$desc = $task->percentComplete . '% - ' . $desc;
 			}
-			return [
-				'summary' => $task->title,
-				'description' => $desc !== '' ? $desc : null,
-				'location' => ($task->location !== null && $task->location !== '') ? $task->location : null,
-				'url' => ($task->url !== null && $task->url !== '') ? $task->url : null,
-				'priority' => $task->priority > 0 ? $task->priority : null,
-			];
+			return ['summary' => self::lineBreaks($task->title), 'description' => self::nonEmpty(self::lineBreaks($desc))] + $common;
 		}
 
 		// Live slot SUMMARY: <lock> [! if overdue] title. The relation marker,
@@ -191,31 +244,9 @@ class IcalCodec {
 		// cue for an overdue task stays in the SUMMARY.
 		$summary = '🔒 '
 			. (self::isUrgent($task, $now) ? '! ' : '')
-			. $task->title;
-		return [
-			'summary' => $summary,
-			'description' => self::structuredDescription($task, $now),
-			'location' => ($task->location !== null && $task->location !== '') ? $task->location : null,
-			'url' => ($task->url !== null && $task->url !== '') ? $task->url : null,
-			'priority' => $task->priority > 0 ? $task->priority : null,
-		];
-	}
-
-	/**
-	 * Relation marker for the slot SUMMARY (plan 0.9.1): a task with subtasks
-	 * gets a leading marker, and a task that is itself a subtask gets a different
-	 * one. A mid-tree node (both) shows the "has children" marker -- the more
-	 * structural info wins. Resolved in CalendarRepository::getTasks from the
-	 * calendar's RELATED-TO;RELTYPE=PARENT links (child -> parent uid).
-	 */
-	public static function relationMark(Task $task): string {
-		if ($task->hasChildren) {
-			return '↴ ';
-		}
-		if ($task->parentUid !== null) {
-			return '↳ ';
-		}
-		return '';
+			. self::lineBreaks($task->title);
+		$description = self::structuredDescription($task, $now);
+		return ['summary' => $summary, 'description' => $description !== null ? self::lineBreaks($description) : null] + $common;
 	}
 
 	/**
@@ -225,7 +256,8 @@ class IcalCodec {
 	 *   Completion: 60%
 	 *   Priority: 3
 	 *   Status: ⏰ Overdue
-	 *   Subtasks: ↴
+	 *   Subtasks: ↴ <titles>
+	 *   Parent task: ↳ <top task> › … › <parent>
 	 *   Link: https://ex.test/t
 	 *   👣 First step: <promoted from `First step:` or legacy `Next:` notes>
 	 *
@@ -235,7 +267,7 @@ class IcalCodec {
 	 * auto-linked (v-linkify, white-space: pre-wrap), so the headers survive
 	 * literally and the Link: line becomes clickable. Each metadata line is
 	 * emitted only when that field is present; the overdue ⏰ and the subtask
-	 * ↴/↳ marker live here (moved out of the SUMMARY in 0.9.2 so the narrow
+	 * ↴/↳ markers live here (moved out of the SUMMARY in 0.9.2 so the narrow
 	 * day-view block keeps room for the title). Each section header is emitted
 	 * only when its section has content. The Title: line always leads the
 	 * ---Task--- section (0.9.6), so the block is never empty for a real task.
@@ -255,8 +287,7 @@ class IcalCodec {
 		if ($now !== null && self::isUrgent($task, $now)) {
 			$meta[] = 'Status: ⏰ Overdue';
 		}
-		// Subtask relation moved here from the SUMMARY (0.9.2): has-children
-		// wins (mid-tree node), mirroring relationMark().
+		// Subtask relations moved here from the SUMMARY (0.9.2).
 		if ($task->childTitles !== []) {
 			$visible = array_slice($task->childTitles, 0, 5);
 			$line = 'Subtasks: ' . implode('; ', array_map(fn (string $title) => '↴ ' . $title, $visible));
@@ -265,12 +296,11 @@ class IcalCodec {
 				$line .= '; +' . $remaining . ' more';
 			}
 			$meta[] = $line;
-		} elseif ($task->hasChildren) {
-			$meta[] = 'Subtasks: ↴';
 		}
 		if ($task->parentTitle !== null) {
 			$meta[] = 'Parent task: ↳ ' . $task->parentTitle;
 		} elseif ($task->parentUid !== null) {
+			// The parent is not in this calendar.
 			$meta[] = 'Parent task: ↳';
 		}
 		if ($task->url !== null && $task->url !== '') {
@@ -282,16 +312,9 @@ class IcalCodec {
 		if ($firstStep !== null) {
 			$meta[] = '👣 First step: ' . $firstStep;
 		}
-		$taskBlock = $meta !== [] ? "---Task---\n" . implode("\n", $meta) : '';
+		$taskBlock = "---Task---\n" . implode("\n", $meta);
 		$notes = self::notesWithoutFirstStep($task->description);
-		$notesBlock = $notes !== '' ? "---Notes---\n" . $notes : '';
-		if ($taskBlock === '' && $notesBlock === '') {
-			return null;
-		}
-		if ($taskBlock !== '' && $notesBlock !== '') {
-			return $taskBlock . "\n\n" . $notesBlock;
-		}
-		return $taskBlock . $notesBlock;
+		return $notes !== '' ? $taskBlock . "\n\n---Notes---\n" . $notes : $taskBlock;
 	}
 
 	/**
@@ -361,7 +384,7 @@ class IcalCodec {
 			if ($reltype !== null && $reltype !== 'PARENT') {
 				continue;
 			}
-			$val = (string)$p->getValue();
+			$val = trim((string)$p->getValue());
 			return $val !== '' ? $val : null;
 		}
 		return null;
@@ -380,32 +403,48 @@ class IcalCodec {
 		return null;
 	}
 
-	/** @param string[] $categories */
+	/**
+	 * Replace the categories of the task in *ics* (its master component, not
+	 * an overridden occurrence).
+	 *
+	 * @param string[] $categories
+	 */
 	public static function replaceTaskCategories(string $ics, array $categories): string {
 		$vcal = Reader::read($ics);
 		if (!($vcal instanceof VCalendar)) {
 			throw new \InvalidArgumentException('Expected a VCALENDAR');
 		}
-		$vtodos = $vcal->select('VTODO');
-		if ($vtodos === []) {
+		$vtodo = null;
+		foreach ($vcal->select('VTODO') as $candidate) {
+			if (!isset($candidate->{'RECURRENCE-ID'})) {
+				$vtodo = $candidate;
+				break;
+			}
+		}
+		if ($vtodo === null) {
 			throw new \InvalidArgumentException('Expected a VTODO');
 		}
-		$vtodo = $vtodos[0];
 		$vtodo->remove('CATEGORIES');
-		$categories = array_values(array_unique(array_filter(array_map('strval', $categories), fn (string $value) => $value !== '')));
+		$categories = array_values(array_unique(array_filter(array_map(fn ($value) => trim((string)$value), $categories), fn (string $value) => $value !== '')));
 		if ($categories !== []) {
 			$vtodo->add('CATEGORIES', $categories);
 		}
 		return $vcal->serialize();
 	}
 
+	/**
+	 * The block for *task*. Its times are written in UTC: a TZID would need a
+	 * VTIMEZONE definition (RFC 5545 3.2.19), which clients without that
+	 * zone's rules cannot do without.
+	 */
 	public static function buildSlotEvent(Task $task, \DateTimeImmutable $start, \DateTimeImmutable $end, ?\DateTimeImmutable $now = null): string {
+		$utc = new \DateTimeZone('UTC');
 		$vcal = new VCalendar();
 		$vcal->PRODID = '-//Nextcloud//CalPlan//EN';
 		$vevent = $vcal->createComponent('VEVENT');
 		$vevent->UID = Defaults::SLOT_UID_PREFIX . $task->id;
-		$vevent->DTSTART = $start;
-		$vevent->DTEND = $end;
+		$vevent->DTSTART = $start->setTimezone($utc);
+		$vevent->DTEND = $end->setTimezone($utc);
 		$vevent->STATUS = 'CONFIRMED';
 		// Mirror the task's rich content via the shared slotContent() helper so
 		// the reconciler can detect content-only edits (plan 1.5.11). The slot
@@ -427,6 +466,9 @@ class IcalCodec {
 		if ($content['url'] !== null) {
 			$vevent->URL = $content['url'];
 		}
+		if ($content['classification'] !== null) {
+			$vevent->CLASS = $content['classification'];
+		}
 		// Standard link back to the originating VTODO.
 		$rel = $vcal->createProperty('RELATED-TO', $task->id);
 		$rel['RELTYPE'] = 'TODO';
@@ -436,6 +478,15 @@ class IcalCodec {
 		return $vcal->serialize();
 	}
 
+	private static function hasRecurringEvent(VCalendar $vcal): bool {
+		foreach ($vcal->select('VEVENT') as $vevent) {
+			if (isset($vevent->RRULE) || isset($vevent->RDATE)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	private static function stringProp(Component $comp, string $name): string {
 		foreach ($comp->select($name) as $p) {
 			return (string)$p->getValue();
@@ -443,9 +494,31 @@ class IcalCodec {
 		return '';
 	}
 
-	private static function dateTimeProp(Component $comp, string $name): ?\DateTimeImmutable {
+	/** *value*, or null when it is empty (a value of "0" is kept). */
+	private static function nonEmpty(?string $value): ?string {
+		return $value !== null && $value !== '' ? $value : null;
+	}
+
+	/** *text* with CRLF and lone CR line breaks as LF, as they read back after a write. */
+	private static function lineBreaks(?string $text): ?string {
+		return $text === null ? null : str_replace(["\r\n", "\r"], "\n", $text);
+	}
+
+	/** Whether the first *name* property is a DATE (all-day) value. */
+	private static function isDateOnly(Component $comp, string $name): bool {
 		foreach ($comp->select($name) as $p) {
-			$dt = $p->getDateTime();
+			return method_exists($p, 'hasTime') && !$p->hasTime();
+		}
+		return false;
+	}
+
+	/** The first *name* property as a time; DATE and floating values are taken in *tz*. */
+	private static function dateTimeProp(Component $comp, string $name, ?\DateTimeZone $tz = null): ?\DateTimeImmutable {
+		foreach ($comp->select($name) as $p) {
+			if (!method_exists($p, 'getDateTime')) {
+				return null;
+			}
+			$dt = $p->getDateTime($tz);
 			if ($dt instanceof \DateTimeImmutable) {
 				return $dt;
 			}
@@ -456,12 +529,15 @@ class IcalCodec {
 		return null;
 	}
 
-	/** @return string[] */
+	/** @return string[] the CATEGORIES values, trimmed ("work, calplan" gives "work" and "calplan") */
 	private static function categories(Component $comp): array {
 		$cats = [];
 		foreach ($comp->select('CATEGORIES') as $p) {
 			foreach ($p->getParts() as $part) {
-				$cats[] = $part;
+				$part = trim((string)$part);
+				if ($part !== '') {
+					$cats[] = $part;
+				}
 			}
 		}
 		return $cats;
@@ -474,11 +550,11 @@ class IcalCodec {
 	 * Returns 0 when absent or invalid so callers can use the default estimate.
 	 */
 	public static function notesDurationToMinutes(string $notes): int {
-		if (!preg_match('/^\s*Duration\s*:\s*(.+?)\s*$/mi', $notes, $line)) {
+		if (!preg_match('/^[ \t]*Duration[ \t]*:[ \t]*(.*?)[ \t]*$/mi', $notes, $line)) {
 			return 0;
 		}
 		$value = trim($line[1]);
-		if (!preg_match('/^(?:(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours))?(?:\s*(\d+(?:\.\d+)?)\s*(?:m|min|mins|minute|minutes))?$/i', $value, $parts)) {
+		if ($value === '' || !preg_match('/^(?:(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours))?(?:\s*(\d+(?:\.\d+)?)\s*(?:m|min|mins|minute|minutes))?$/i', $value, $parts)) {
 			return 0;
 		}
 		$hours = isset($parts[1]) && $parts[1] !== '' ? (float)$parts[1] : 0.0;
@@ -489,20 +565,21 @@ class IcalCodec {
 
 	/**
 	 * Parse an RFC 5545 DURATION value (e.g. "PT45M", "PT1H30M", "PT1H", "P1D")
-	 * into a whole number of minutes. Returns 0 for an empty/unparseable
-	 * value, so the caller can fall back to the default estimate. Pure and
-	 * Sabre-independent so it can be unit-tested without the VObject library.
+	 * into a whole number of minutes. Returns 0 for an empty, unparseable or
+	 * negative value, so the caller can fall back to the default estimate.
+	 * Case-insensitive, as RFC 5545 values are. Pure and Sabre-independent so
+	 * it can be unit-tested without the VObject library.
 	 */
 	public static function durationToMinutes(string $raw): int {
-		$s = ltrim($raw, "+-");
-		if ($s === "" || !preg_match('/^P(?:([0-9.]+)W)?(?:([0-9.]+)D)?(?:T(?:([0-9.]+)H)?(?:([0-9.]+)M)?(?:([0-9.]+)S)?)?$/', $s, $m)) {
+		$s = strtoupper(trim($raw));
+		if (str_starts_with($s, '-')) {
 			return 0;
 		}
-		$weeks = isset($m[1]) && $m[1] !== "" ? (float)$m[1] : 0.0;
-		$days = isset($m[2]) && $m[2] !== "" ? (float)$m[2] : 0.0;
-		$hours = isset($m[3]) && $m[3] !== "" ? (float)$m[3] : 0.0;
-		$minutes = isset($m[4]) && $m[4] !== "" ? (float)$m[4] : 0.0;
-		$seconds = isset($m[5]) && $m[5] !== "" ? (float)$m[5] : 0.0;
-		return (int)round($weeks * 7 * 24 * 60 + $days * 24 * 60 + $hours * 60 + $minutes + $seconds / 60);
+		$s = ltrim($s, '+');
+		if ($s === '' || !preg_match('/^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/', $s, $m)) {
+			return 0;
+		}
+		$n = fn (int $i): int => isset($m[$i]) && $m[$i] !== '' ? (int)$m[$i] : 0;
+		return $n(1) * 7 * 24 * 60 + $n(2) * 24 * 60 + $n(3) * 60 + $n(4) + intdiv($n(5) + 30, 60);
 	}
 }
