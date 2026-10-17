@@ -37,6 +37,8 @@ class HistoryController extends OCSController {
 		} catch (\InvalidArgumentException $e) {
 			return new DataResponse(['error' => $e->getMessage()], Http::STATUS_BAD_REQUEST);
 		}
+		// A shorter retention, or turning collection off, applies to what is kept now.
+		$this->history->pruneUser($uid);
 		return new DataResponse($this->config->getBehavioralHistorySettings($uid));
 	}
 

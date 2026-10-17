@@ -5,7 +5,16 @@
  * CalPlan Tasks-frontend injection styles.
  */
 
-/* 1. Task list item badge/icon */
+/* 1. Task list item badge/icon, and when its next block is planned */
+.calplan-planned {
+	display: inline-flex;
+	align-items: center;
+	margin-inline: 4px;
+	color: var(--color-text-maxcontrast);
+	font-size: 0.9em;
+	white-space: nowrap;
+}
+
 .calplan-task-icon {
 	display: inline-flex;
 	align-items: center;
@@ -29,8 +38,24 @@
 	width: 100%;
 	color: var(--color-text-lighter);
 	display: flex;
+	align-items: center;
 	cursor: pointer;
 	transition: background-color 0.15s ease;
+}
+
+/* Hidden while no task is open (the [hidden] rule beats `display: flex`). */
+.property__item.calplan-toggle-row[hidden] {
+	display: none !important;
+}
+
+/* A task Tasks cannot save (read-only or non-public shared calendar). */
+.property__item.calplan-toggle-row.is-disabled {
+	cursor: default;
+	opacity: 0.6;
+}
+
+.property__item.calplan-toggle-row.is-disabled:hover {
+	background-color: transparent;
 }
 
 .property__item.calplan-toggle-row:hover {
@@ -64,16 +89,156 @@
 
 .property__item.calplan-toggle-row .content__name {
 	flex-grow: 1;
+	min-width: 0;
 	padding-right: 14px;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
+.property__item.calplan-toggle-row .calplan-switch-wrapper {
+	margin-inline-end: 8px;
+}
+
 .property__item.calplan-toggle-row .item__actions {
 	display: flex;
 	flex-wrap: nowrap;
 	align-items: center;
+}
+
+/* 3. Sidebar Duration row — same geometry as the Auto-schedule row, hidden
+ *    while no task is open (the [hidden] rule beats `display: flex`). */
+.property__item.calplan-duration-row {
+	border-bottom: 1px solid var(--color-border);
+	padding: 0 6px;
+	width: 100%;
+	color: var(--color-text-lighter);
+	display: flex;
+}
+
+.property__item.calplan-duration-row[hidden] {
+	display: none !important;
+}
+
+.property__item.calplan-duration-row .item__content {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	line-height: var(--default-clickable-area);
+	min-width: 0;
+	flex-grow: 1;
+	gap: 0 4px;
+}
+
+.property__item.calplan-duration-row .content__icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: var(--default-clickable-area);
+	width: var(--default-clickable-area);
+	min-width: var(--default-clickable-area);
+	flex-shrink: 0;
+}
+
+.property__item.calplan-duration-row .content__name {
+	flex: 1 1 auto;
+	min-width: 0;
+	padding-right: 14px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* The steppers move under the label when the sidebar is too narrow for both. */
+.property__item.calplan-duration-row .item__actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	align-items: center;
+	gap: 4px;
+	margin-inline-start: auto;
+	padding-inline-end: 8px;
+}
+
+/* − [value] + steppers. The bordered box is the stepper; the input inside is
+ * borderless. !important beats core inputs.css/buttons, whose long
+ * :not() selectors outrank these classes. Native spinners stay hidden. */
+.calplan-stepper {
+	display: inline-flex;
+	align-items: center;
+	height: 36px;
+	padding: 0 2px;
+	border: 2px solid var(--color-border-maxcontrast, #949494);
+	border-radius: var(--border-radius-element, var(--border-radius-large, 10px));
+	background-color: var(--color-main-background);
+	transition: border-color 0.1s ease;
+}
+
+.calplan-stepper:hover {
+	border-color: var(--color-main-text);
+}
+
+.calplan-stepper:focus-within {
+	border-color: var(--color-primary-element, #0082c9);
+}
+
+.calplan-stepper .calplan-duration-input {
+	width: 2.6em !important;
+	min-width: 0 !important;
+	height: 30px !important;
+	min-height: 0 !important;
+	margin: 0 !important;
+	padding: 0 !important;
+	border: 0 !important;
+	outline: none !important;
+	box-shadow: none !important;
+	background: transparent !important;
+	color: var(--color-main-text);
+	font-variant-numeric: tabular-nums;
+	text-align: center;
+	-webkit-appearance: textfield;
+	-moz-appearance: textfield;
+	appearance: textfield;
+}
+
+.calplan-stepper .calplan-duration-input::-webkit-inner-spin-button,
+.calplan-stepper .calplan-duration-input::-webkit-outer-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
+}
+
+.calplan-stepper .calplan-stepper-button {
+	display: inline-flex !important;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	width: 28px !important;
+	height: 28px !important;
+	min-width: 0 !important;
+	min-height: 0 !important;
+	margin: 0 !important;
+	padding: 0 !important;
+	border: 0 !important;
+	border-radius: 50% !important;
+	background: transparent !important;
+	color: var(--color-text-maxcontrast, #767676);
+	cursor: pointer;
+	transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.calplan-stepper .calplan-stepper-button:hover,
+.calplan-stepper .calplan-stepper-button:focus-visible {
+	background-color: var(--color-background-hover) !important;
+	color: var(--color-main-text);
+}
+
+.calplan-stepper .calplan-stepper-button:active {
+	background-color: var(--color-primary-element-light, rgba(0, 130, 201, 0.15)) !important;
+	color: var(--color-primary-element, #0082c9);
+}
+
+.calplan-duration-unit {
+	margin-inline-end: 6px;
 }
 
 .calplan-help-button,
@@ -206,7 +371,7 @@
 	transform: translateX(16px);
 }
 
-.property__item.calplan-toggle-row:focus-visible {
+.property__item.calplan-toggle-row [role="switch"]:focus-visible {
 	box-shadow: inset 0 0 0 2px var(--color-primary-element-light, rgba(0, 130, 201, 0.4));
 	outline: none;
 	border-radius: 2px;
@@ -286,4 +451,155 @@
 
 @keyframes calplan-reconcile-spin {
 	to { transform: rotate(360deg); }
+}
+
+/* 5. Daily limit section (tasks with subtasks): a header that folds the
+ *    body; the body's lines share a label column so steppers line up. */
+.property__item.calplan-limit-row {
+	flex-direction: column;
+	align-items: stretch;
+}
+
+.calplan-limit-row .calplan-limit-header {
+	cursor: pointer;
+	border-radius: var(--border-radius-element, 6px);
+}
+
+.calplan-limit-row .calplan-limit-header:hover {
+	background-color: var(--color-background-hover);
+}
+
+.calplan-limit-row .calplan-limit-header:focus-visible {
+	box-shadow: inset 0 0 0 2px var(--color-primary-element-light, rgba(0, 130, 201, 0.4));
+	outline: none;
+}
+
+.calplan-limit-summary {
+	margin-inline-end: 4px;
+	color: var(--color-text-maxcontrast);
+	white-space: nowrap;
+}
+
+.calplan-fold-chevron {
+	display: flex;
+	margin-inline-end: 8px;
+	transition: transform 0.15s ease;
+}
+
+.calplan-limit-row.is-open .calplan-fold-chevron {
+	transform: rotate(180deg);
+}
+
+.calplan-limit-body {
+	display: grid;
+	gap: 6px;
+	padding: 2px 8px 10px var(--default-clickable-area, 34px);
+}
+
+.calplan-limit-row:not(.is-open) .calplan-limit-body {
+	display: none;
+}
+
+.calplan-limit-line {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px;
+}
+
+.calplan-limit-label {
+	flex: 0 0 4.5em;
+	padding-inline-start: 4px;
+}
+
+/* 6. Split if needed: a switch row like Auto-schedule; a note when a parent's flag applies. */
+.calplan-split-row .calplan-split-inherited {
+	display: none;
+	margin-inline-end: 10px;
+	color: var(--color-text-maxcontrast);
+	font-size: 0.9em;
+	white-space: nowrap;
+}
+
+.calplan-split-row.is-inherited .calplan-split-inherited {
+	display: inline;
+}
+
+
+/* 7. Not scheduled: an icon in the task list and a notice row in the sidebar. */
+.calplan-unscheduled-icon {
+	display: inline-flex;
+	align-items: center;
+	margin-inline-end: 4px;
+	color: var(--color-warning, #c28900);
+}
+
+.property__item.calplan-notice-row {
+	display: flex;
+	width: 100%;
+	padding: 0 6px;
+	border-bottom: 1px solid var(--color-border);
+	color: var(--color-warning-text, #8a6100);
+}
+
+.property__item.calplan-notice-row[hidden] {
+	display: none !important;
+}
+
+/* The planned blocks: a plain line like the notice, in the text color. */
+.property__item.calplan-planned-row {
+	display: flex;
+	width: 100%;
+	padding: 0 6px;
+	border-bottom: 1px solid var(--color-border);
+	color: var(--color-text-lighter);
+}
+
+.property__item.calplan-planned-row[hidden] {
+	display: none !important;
+}
+
+.calplan-planned-row .item__content {
+	display: flex;
+	align-items: center;
+	gap: 0 4px;
+	min-width: 0;
+	min-height: var(--default-clickable-area);
+}
+
+.calplan-planned-row .content__icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: var(--default-clickable-area);
+	min-width: var(--default-clickable-area);
+}
+
+.calplan-planned-row .content__name {
+	white-space: normal;
+	line-height: 1.3;
+	padding-block: 6px;
+}
+
+.calplan-notice-row .item__content {
+	display: flex;
+	align-items: center;
+	gap: 0 4px;
+	min-width: 0;
+	min-height: var(--default-clickable-area);
+}
+
+.calplan-notice-row .content__icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: var(--default-clickable-area);
+	min-width: var(--default-clickable-area);
+	color: var(--color-warning, #c28900);
+}
+
+.calplan-notice-row .content__name {
+	white-space: normal;
+	line-height: 1.3;
+	padding-block: 6px;
 }

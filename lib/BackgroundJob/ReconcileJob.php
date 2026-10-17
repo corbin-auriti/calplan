@@ -6,9 +6,10 @@ declare(strict_types=1);
  * SPDX-FileCopyrightText: 2026 Nextcloud contributors
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Cron-driven reconciliation pass. Registered in Application::register(). On each
- * tick it reconciles every user for whom the app is enabled; per-user work is
- * bounded (calendars with nothing to do are skipped inside ReconcileService).
+ * Cron-driven reconciliation pass, declared in appinfo/info.xml. On each tick
+ * it reconciles every user for whom the app is enabled and who has something
+ * to plan or review; per-user work is bounded (calendars with nothing to do are
+ * skipped inside ReconcileService).
  */
 
 namespace OCA\AutoSchedule\BackgroundJob;
@@ -44,11 +45,20 @@ class ReconcileJob extends TimedJob {
 			if (!$this->appManager->isEnabledForUser(Application::APP_ID, $user)) {
 				return;
 			}
+			// A user whose last reconcile had no task to schedule and no block
+			// has nothing to review either; flagging a task re-plans at once
+			// (CalendarObjectChangeListener), so cron can leave them alone.
+			if ($this->configService->hasPlanState($uid) && !$this->configService->isPlanActive($uid)
+				&& $this->configService->getFlaggedCalendars($uid) === []) {
+				return;
+			}
 			try {
 				$now = new \DateTimeImmutable('now', $this->configService->getUserTimeZone($uid));
 				$processReview = $this->configService->isReviewCheckDue($uid, $now);
-				$this->reconcileService->reconcileUser($uid, $processReview, 'background');
-				if ($processReview) {
+				// Never wait for a run in progress: the next tick comes soon enough.
+				$this->reconcileService->reconcileUser($uid, $processReview, 'background', 0);
+				// lastReport() is null when the run was skipped (another one was running).
+				if ($processReview && $this->reconcileService->lastReport() !== null) {
 					$this->configService->markReviewChecked($uid, $now);
 				}
 			} catch (\Throwable $e) {

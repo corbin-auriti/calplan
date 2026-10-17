@@ -21,11 +21,13 @@ return [
 		['name' => 'History#setSettings', 'url' => '/api/v1/history/settings', 'verb' => 'PUT'],
 		['name' => 'History#export', 'url' => '/api/v1/history/export', 'verb' => 'POST'],
 		['name' => 'History#delete', 'url' => '/api/v1/history', 'verb' => 'DELETE'],
-		// Trigger a reconciliation pass for the calling user on demand. This is the
-		// "Schedule now" affordance and the path the Playwright E2E uses to drive
-		// ReconcileService directly (the cron-driven first-run sweep can hold the
-		// SQLite write lock long enough to block concurrent writers).
+		// Trigger a reconciliation pass for the calling user on demand: the
+		// Reconcile button, settings saves, and the path the Playwright E2E uses
+		// to drive ReconcileService directly.
 		['name' => 'Reconcile#reconcileNow', 'url' => '/api/v1/reconcile', 'verb' => 'POST'],
 		['name' => 'Reconcile#getStatus', 'url' => '/api/v1/reconcile/status', 'verb' => 'GET'],
+		// Hold back the per-write re-plans while the client writes many tasks
+		// (a parent's Auto-schedule switch); it then calls /reconcile once.
+		['name' => 'Reconcile#hold', 'url' => '/api/v1/reconcile/hold', 'verb' => 'POST'],
 	],
 ];

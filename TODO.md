@@ -30,10 +30,14 @@ feature scope.
 - **Operator diagnostics switch — done** — privacy-safe reconcile timings are gated behind
   the standard `occ config:app:set calplan performance_logging ...` app setting;
   disabled by default and separate from personal behavioral-history consent.
-- **Non-blocking reconcile** — VTODO changes remain immediate, but ordinary
-  VEVENT writes must not run a full-user schedule inside the CalDAV transaction.
-  Follow up with a deduplicated per-user deferred queue so event changes are
-  near-real-time without blocking the save request.
+- **Non-blocking reconcile** — VTODO and ordinary VEVENT changes re-plan once
+  per user at the end of the save request (DeferredReplans), outside the
+  CalDAV write transaction, so blocks move the moment an event is saved, from
+  any client. The listener skips CalPlan's own blocks, ignored calendars,
+  transparent or out-of-window events, users with nothing to plan
+  (`plan_active`) and held re-plans; a re-plan takes ~0.1–0.3 s for one user.
+  Next at scale: a queue that also merges re-plans of separate requests (one
+  PUT per event of a web import) without blocking the save request.
 - **Scale profiling** — pure scheduler fixtures now cover 60/250 tasks and
   120/500 busy events, and each live reconcile logs privacy-safe phase timings.
   Next: orchestration fixtures across calendars, then later many-user load tests.

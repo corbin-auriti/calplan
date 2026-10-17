@@ -8,9 +8,10 @@
 .calplan-settings-group__content { padding: 4px 18px 18px; }
 .calplan-setting-row { margin: 20px 0; }
 .calplan-setting-row > label { display: block; font-weight: 600; margin-bottom: 6px; }
-.calplan-setting-row input[type="number"], .calplan-setting-row select, .calplan-setting-row textarea { min-width: 260px; }
+.calplan-setting-row input[type="number"], .calplan-setting-row select, .calplan-setting-row textarea { min-width: min(260px, 100%); max-width: 100%; }
 .calplan-setting-row textarea { width: min(520px, 100%); resize: vertical; }
 #calplan-settings-status { margin-inline-start: 12px; }
+.calplan-save-status.is-unsaved { color: var(--color-warning-text, #8a6100); font-weight: 600; }
 .calplan-checkbox-row { display: flex; align-items: center; gap: 8px; }
 #calplan-personal-settings h3 { margin-top: 36px; }
 #calplan-history-status { display: inline-block; margin-inline-start: 12px; }
@@ -28,3 +29,16 @@
 .calplan-diagnostic-grid dt { font-weight: 600; }
 .calplan-diagnostic-grid dd { margin: 0; }
 .calplan-diagnostic-calendars ul { margin: 8px 0 0 20px; }
+.calplan-working-hours { display: grid; gap: 2px; margin: 16px 0 20px; }
+/* Checkbox, day, then the two times on one line; on a narrow screen the times move under the day and shrink. */
+.calplan-working-day { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 44px; padding: 4px 8px; border-radius: var(--border-radius-element, 6px); }
+.calplan-working-day label { flex: 0 0 7.5em; }
+.calplan-wh-times { display: inline-flex; flex: 0 1 auto; flex-wrap: nowrap; align-items: center; gap: 10px; min-width: 0; }
+.calplan-working-day:hover { background: var(--color-background-hover); }
+.calplan-working-day label { font-weight: 600; }
+/* Wide enough for a 12-hour browser locale ("09:00 AM" plus the clock icon),
+ * and free to grow if a locale needs more. */
+.calplan-working-day input[type="time"] { flex: 0 1 auto; width: auto; min-width: 0; margin: 0; }
+.calplan-working-day.is-off label, .calplan-working-day.is-off span { color: var(--color-text-maxcontrast); }
+.calplan-working-day.is-off input[type="time"] { opacity: 0.5; }
+#calplan-working-hours-status { display: inline-block; margin-inline-start: 12px; }

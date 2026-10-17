@@ -72,4 +72,25 @@ class WorkingHoursServiceTest extends AutoScheduleTestCase {
 		$this->assertNotNull(WorkingHoursService::validateMap(['mon' => ['start' => '17:00', 'end' => '9:00']]));
 		$this->assertNotNull(WorkingHoursService::validateMap(['mon' => ['start' => 'nine', 'end' => '17:00']]));
 	}
+
+	public function testValidationAcceptsMidnightAndRejectsImpossibleTimes(): void {
+		$this->assertNull(WorkingHoursService::validateMap(['mon' => ['start' => '18:00', 'end' => '24:00']]));
+		$this->assertNotNull(WorkingHoursService::validateMap(['mon' => ['start' => '09:00', 'end' => '99:00']]));
+		$this->assertNotNull(WorkingHoursService::validateMap(['mon' => ['start' => '09:60', 'end' => '17:00']]));
+		$this->assertNotNull(WorkingHoursService::validateMap(['mon' => ['start' => '24:00', 'end' => '24:00']]));
+	}
+
+	public function testNextcloudAvailabilityBecomesOneWindowPerDay(): void {
+		if (!class_exists('\\Sabre\\VObject\\Reader')) {
+			$this->markTestSkipped('Sabre\\VObject not available in this environment');
+		}
+		$ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:Nextcloud DAV app\r\nBEGIN:VAVAILABILITY\r\n"
+			. "BEGIN:AVAILABLE\r\nUID:a\r\nDTSTART;TZID=Europe/Rome:20241014T090000\r\nDTEND;TZID=Europe/Rome:20241014T120000\r\nRRULE:FREQ=WEEKLY;BYDAY=MO,TU\r\nEND:AVAILABLE\r\n"
+			. "BEGIN:AVAILABLE\r\nUID:b\r\nDTSTART;TZID=Europe/Rome:20241014T130000\r\nDTEND;TZID=Europe/Rome:20241014T173000\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\nEND:AVAILABLE\r\n"
+			. "END:VAVAILABILITY\r\nEND:VCALENDAR\r\n";
+		$this->assertSame([
+			'mon' => ['start' => '9:00', 'end' => '17:30'],
+			'tue' => ['start' => '9:00', 'end' => '12:00'],
+		], WorkingHoursService::fromAvailability($ics));
+	}
 }

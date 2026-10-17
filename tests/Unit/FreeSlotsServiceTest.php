@@ -13,6 +13,19 @@ use OCA\AutoSchedule\Model\BusyBlock;
 use OCA\AutoSchedule\Service\FreeSlotsService;
 
 class FreeSlotsServiceTest extends AutoScheduleTestCase {
+	public function testFreeSlotsStayInTheWindowsTimezoneWhereUtcBusyCutsThem(): void {
+		$sydney = new \DateTimeZone('Australia/Sydney');
+		$window = new \OCA\AutoSchedule\Model\Slot(
+			new \DateTimeImmutable('2026-08-20 09:00:00', $sydney),
+			new \DateTimeImmutable('2026-08-20 17:00:00', $sydney),
+		);
+		// A recurring 09:00-09:30 standup as Sabre expands it: in UTC, the previous day.
+		$standup = new BusyBlock($this->utc('2026-08-19 23:00:00'), $this->utc('2026-08-19 23:30:00'));
+		$free = FreeSlotsService::subtractBusy($window, [$standup]);
+		$this->assertCount(1, $free);
+		$this->assertSame('2026-08-20 09:30 Australia/Sydney', $free[0]->start->format('Y-m-d H:i e'));
+	}
+
 	public function testSnapUpRoundsToNextBoundary(): void {
 		$this->assertSame('2026-08-19 10:15:00', FreeSlotsService::snapUp($this->utc('2026-08-19 10:07:31'))->format('Y-m-d H:i:s'));
 		$this->assertSame('2026-08-19 10:00:00', FreeSlotsService::snapUp($this->utc('2026-08-19 10:00:00'))->format('Y-m-d H:i:s'));
@@ -59,5 +72,11 @@ class FreeSlotsServiceTest extends AutoScheduleTestCase {
 		$busy = [new BusyBlock($this->utc('2026-08-19 09:00:00'), $this->utc('2026-08-19 16:30:00'))];
 		$slots = FreeSlotsService::freeSlots($this->allWeek(), $busy, $this->utc('2026-08-19 08:00:00'), 1, 60);
 		$this->assertSame([], $slots);
+	}
+
+	public function testAReversedBusyBlockHoldsNoTime(): void {
+		$window = new \OCA\AutoSchedule\Model\Slot($this->utc('2026-08-19 09:00:00'), $this->utc('2026-08-19 17:00:00'));
+		$reversed = new BusyBlock($this->utc('2026-08-19 10:00:00'), $this->utc('2026-08-19 09:30:00'));
+		$this->assertCount(1, FreeSlotsService::subtractBusy($window, [$reversed]));
 	}
 }
